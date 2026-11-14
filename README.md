@@ -2,6 +2,8 @@
 
 **NASA Space Apps Challenge 2026 · Asunción · Challenge: _Harmonization of MODIS and VIIRS Hot Spots_**
 
+**Live app: https://tata-rekavo.vercel.app** (English / Español)
+
 *Tata Rekavo* means "fire tracker" in Guaraní.
 
 Satellites have counted fire hotspots over Paraguay since 2000, but the record is split in two: MODIS (Terra, Aqua) since 2000 and VIIRS (Suomi NPP, NOAA-20) since 2012. VIIRS has a finer pixel (375 m vs 1 km) and detects about **3.4 times more hotspots** over Paraguay. Stitching the raw records together makes burning appear to jump **×2.8 after 2012**, and that jump comes from the change of sensor, not from more fire. This repository turns both records into **one consistent monthly series in a single unit: VIIRS S-NPP-equivalent hotspots**, validated against real VIIRS observations, with a measured error for every value.
