@@ -1,0 +1,5 @@
+data/raw/
+data/api_cache/
+.env
+__pycache__/
+*.pyc
