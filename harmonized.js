@@ -205,7 +205,7 @@ export function departmentRanking(grid, departments, m, coverage = 1) {
     return {
       id: d.id, name: d.name, value: v.value, median: v.median, ratio: v.ratio,
       classId: v.class.id, relativeError: v.relativeError,
-      lowSignal: !(v.median >= LOW_SIGNAL_MEDIAN), // also true for NaN (no history) partial: v.partial,
+      lowSignal: !(v.median >= LOW_SIGNAL_MEDIAN), partial: v.partial, // !(>=) is also true for a NaN median (no history)
     };
   });
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
