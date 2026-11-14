@@ -70,6 +70,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 | `burn_history.json` | ~1 km rasters: last year each cell burned, and number of years it burned (2002–2025) |
 | `series_regions.csv` | Monthly harmonized / raw MODIS / raw VIIRS for Paraguay, Chaco, Oriental |
 | `grid_monthly.csv` | Same as `grid.json` in long CSV form |
+| `hotspots/*.csv.gz` | Individual hotspots Jul 2002 – Dec 2025, one gzip CSV per 1° block (~46 MB in total), with `harmonized_weight`, plus `index.json` |
 | `gaps.json` | Detected sensor outages and the days filled |
 | `mask.json` | ~5 km country mask (cells with any hotspot in the Paraguay archives), used to clip API data |
 | `metrics.json` | Full validation results |
@@ -87,15 +88,24 @@ The approach follows the same principle used in the literature to bridge the MOD
 
 ## Web app (`app/`)
 
-**Is this fire normal?** Pick Paraguay, the Chaco, the Oriental region, or draw any area on the map, then pick a month:
+**Is this fire normal?** Pick an area, a month and a date range:
 
-- **Verdict:** the month against the median of the same month in previous years, with its error band. Months still in progress are compared with the same share of a typical month.
-- **Burning calendar:** years × months, colored by the ratio to the usual level. Months before 2012, reconstructed from MODIS, are hatched.
+- **Area:** Paraguay, the Chaco, the Oriental region, any polygon drawn on the map, or a point (latitude / longitude) with a radius.
+- **Verdict:** the selected month against the median of the same month in previous years, with its error band. A month still in progress is compared with the same share of a typical month.
+- **Date range analytics:** total hotspots (± error), ratio to the usual for those months, peak month, months above or below normal, and hotspots in new places. Presets: this year, last 12 months, fire season (Jul–Oct), all.
+- **Burning calendar:** years × months, in two modes.
+  - *vs normal* (diverging, ratio to the usual level).
+  - *Hotspots* (sequential counts, with a "typical year" row that shows when the fire season happens).
+
+  Months reconstructed from MODIS are hatched. The tooltip includes a field-validation hint ("Modo Catador") that turns the model uncertainty into guidance for checking imagery.
 - **Hotspots per year:** a toggle between the harmonized record and the raw sensors stitched together, which shows the false 2012 jump.
 - **Map:** hotspots per ~11 km cell for the month, plus the individual VIIRS hotspots for 2026.
 - **Fire in new places:** 2026 hotspots with no hotspot from any sensor within ~1 km (same or neighbouring 0.01° cell) from July 2002 to December 2025. That is about 2% of them. They are highlighted on the map and flagged in the CSV (`new_place`). Comparing exact cells instead would flag ~10%, which mostly reflects pixel geolocation offsets, so the neighbourhood is required. Hotspots right at the border may be over-flagged, because the history only covers Paraguay.
+- **Downloads for the area and date range:**
+  - The monthly harmonized series (CSV).
+  - Every individual hotspot (CSV: 2002–2025 from the archives plus 2026 from the API, with `harmonized_weight` and `new_place`). The app fetches only the 1° blocks the search touches (`data/app/hotspots/`).
+  - A PNG report with the calendar, the yearly chart and the analytics.
 - **English / Spanish** interface (EN/ES toggle; it follows the browser language by default).
-- **CSV downloads:** the monthly series of the area, and the 2026 hotspots inside it.
 
 Stack: React + TypeScript + Vite + MapLibre GL. It is a static site with no backend. It reads `data/app/` and uses the same `harmonized.js` the pipeline tests run against.
 
@@ -113,6 +123,7 @@ pip install -r requirements.txt
 python firms_pipeline.py download                    # ~300 MB of FIRMS archives into data/raw (resumable)
 python firms_pipeline.py build                       # data/app/*.json, *.csv
 python firms_pipeline.py validate                    # metrics.json, validation.png, error model into grid.json
+python firms_pipeline.py export-hotspots             # data/app/hotspots: individual hotspots in 1-degree gzip blocks
 FIRMS_MAP_KEY=... python firms_pipeline.py fetch-current --start 2026-01-01   # free key: https://firms.modaps.eosdis.nasa.gov/api/map_key/
 node test_contract.mjs data/app
 ```
