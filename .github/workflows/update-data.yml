@@ -32,7 +32,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Restore API cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/api_cache
           key: api-cache-${{ github.run_id }}
@@ -42,6 +42,13 @@ jobs:
         env:
           FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
         run: python firms_pipeline.py fetch-current --out data/app
+
+      - name: Save API cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/api_cache
+          key: api-cache-${{ github.run_id }}
 
       - name: Validate data contract
         run: node test_contract.mjs data/app
