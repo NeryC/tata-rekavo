@@ -33,6 +33,10 @@ interface Props {
   drawing: boolean;
   onDrawn: (ring: number[][]) => void;
   onCancelDraw: () => void;
+  /** the map was panned, zoomed, rotated or tilted away from the area's framing */
+  onUserMove: () => void;
+  /** the map is back on the area's own framing */
+  onViewReset: () => void;
 }
 
 type GJ = GeoJSON.FeatureCollection;
@@ -133,6 +137,16 @@ export default function MapView(p: Props) {
             .addTo(m);
         });
         m.on("mouseleave", "cells", () => popup.remove());
+        // after every move, compare the camera with the area's own framing:
+        // covers mouse, wheel, keyboard, buttons and touch alike
+        m.on("moveend", () => {
+          const home = m.cameraForBounds(props.current.zoneBBox, { padding: 40 });
+          if (!home?.center || home.zoom === undefined) return;
+          const a = m.project(m.getCenter()), b = m.project(home.center as maplibregl.LngLatLike);
+          const moved = Math.hypot(a.x - b.x, a.y - b.y) > 12 || Math.abs(m.getZoom() - home.zoom) > 0.08
+            || Math.abs(m.getBearing()) > 0.5 || m.getPitch() > 0.5;
+          if (moved) props.current.onUserMove(); else props.current.onViewReset();
+        });
         m.on("click", (e) => {
           if (!props.current.drawing) return;
           const next = [...draftRef.current, [e.lngLat.lng, e.lngLat.lat]];

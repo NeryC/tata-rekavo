@@ -40,6 +40,7 @@ export default function App() {
   const [dlError, setDlError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<number | null>(null);
   const [viewNonce, setViewNonce] = useState(0);
+  const [mapMoved, setMapMoved] = useState(false);
 
   useEffect(() => {
     loadData().then((d) => {
@@ -68,6 +69,7 @@ export default function App() {
   const zoneSet = useMemo(() => new Set(zoneCells), [zoneCells]);
   const zoneBBox = useMemo(() => (grid && zoneCells.length ? bboxOfCells(grid.meta, zoneCells) : [-62.8, -27.7, -54.1, -19.1] as [number, number, number, number]), [grid, zoneCells]);
   const series = useMemo(() => (grid ? H.zoneSeries(grid, zoneCells) : null), [grid, zoneCells]);
+  useEffect(() => { setMapMoved(false); }, [zoneBBox]);
   const coverage = useMemo(() => (m: number) => (grid ? H.monthCoverage(grid.meta, m, data?.current ?? null) : 1), [grid, data]);
 
   const monthValues = useMemo(() => {
@@ -105,7 +107,14 @@ export default function App() {
     setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
     setCalMode("ratio"); setNaive(false); setNewOnly(false); setDlError(null);
     setViewNonce((n) => n + 1);
+    setMapMoved(false);
   }
+
+  // "Reset all" only makes sense once something differs from the starting view
+  const lastIdx = data ? data.grid.nMonths - 1 : -1;
+  const startRange = data ? [Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastIdx).year, 1)), lastIdx] : [0, 0];
+  const changed = !!data && (zoneKind !== "paraguay" || drawing || coordsOpen || month !== lastIdx
+    || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || mapMoved);
 
   const header = (
     <header className="top">
@@ -119,7 +128,7 @@ export default function App() {
       <nav>
         <a href={`${REPO}#method`} target="_blank" rel="noreferrer">{t.method}</a>
         <a href={REPO} target="_blank" rel="noreferrer">{t.code}</a>
-        {data && (
+        {changed && (
           <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle} aria-label={t.resetAllTitle}>
             <span aria-hidden>↺</span><span className="lbl">{t.resetAll.replace("↺ ", "")}</span>
           </button>
@@ -220,14 +229,20 @@ export default function App() {
           <aside className="panel">
             <section className="sec-area">
               <h2>{t.step1}</h2>
-              <div className="seg area" role="group" aria-label={t.step1}>
+              <div className="seg area" role="group" aria-label={t.areaPresets}>
                 {(["paraguay", "chaco", "oriental"] as const).map((k) => (
-                  <button key={k} className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
+                  <button key={k} aria-pressed={zoneKind === k && !drawing && !coordsOpen}
+                    className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
                 ))}
-                <button className={drawing || (zoneKind === "custom" && !coords && !coordsOpen) ? "on" : ""}
-                  onClick={() => { setCoordsOpen(false); setDrawing(true); }}>{t.zones.draw}</button>
-                <button className={coordsOpen || (zoneKind === "custom" && coords) ? "on" : ""}
-                  onClick={() => { setDrawing(false); setCoordsOpen(!coordsOpen); }}>{t.coords}</button>
+              </div>
+              <div className="area-tools" role="group" aria-label={t.customArea}>
+                <span className="tools-label">{t.customArea}</span>
+                <button aria-pressed={drawing || (zoneKind === "custom" && !coords && !coordsOpen)}
+                  className={`tool${drawing || (zoneKind === "custom" && !coords && !coordsOpen) ? " on" : ""}`}
+                  onClick={() => { setCoordsOpen(false); setDrawing(true); }}><span aria-hidden>✎</span>{t.drawTool}</button>
+                <button aria-pressed={coordsOpen || (zoneKind === "custom" && !!coords)} aria-expanded={coordsOpen}
+                  className={`tool${coordsOpen || (zoneKind === "custom" && coords) ? " on" : ""}`}
+                  onClick={() => { setDrawing(false); setCoordsOpen(!coordsOpen); }}><span aria-hidden>⌖</span>{t.coordsTool}</button>
               </div>
               {coordsOpen && (<>
                 <div className="coords">
@@ -386,7 +401,8 @@ export default function App() {
           <MapView grid={grid} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
             polygon={zoneKind === "custom" ? polygon : null} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setZoneKind("custom"); setDrawing(false); }}
-            onCancelDraw={() => setDrawing(false)} />
+            onCancelDraw={() => setDrawing(false)}
+            onUserMove={() => setMapMoved(true)} onViewReset={() => setMapMoved(false)} />
         </main>
       </div>
     </I18nContext.Provider>
