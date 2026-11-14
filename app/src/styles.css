@@ -50,6 +50,10 @@ p { margin: 0; }
 .top nav a { color: #f2f4f1; text-underline-offset: 3px; }
 .reset-all { display: inline-flex; gap: 6px; align-items: center; min-height: 36px; padding: 0 12px; background: transparent; color: #f2f4f1; border: 1px solid #6b776e; border-radius: 8px; font-size: 14px; }
 .reset-all:hover { border-color: #f2f4f1; }
+.top { position: relative; }
+.toast { position: absolute; right: 22px; top: calc(100% + 8px); z-index: 20; padding: 8px 14px; border-radius: 8px; background: #f2f4f1; color: var(--night); font-size: 14px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.manual-link { position: absolute; right: 22px; top: calc(100% + 8px); z-index: 20; display: grid; gap: 4px; width: min(420px, calc(100vw - 28px)); padding: 10px 12px; border-radius: 8px; background: #f2f4f1; color: var(--night); font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.manual-link input { width: 100%; min-height: 36px; padding: 0 8px; border: 1px solid var(--edge); border-radius: 6px; background: #fff; font-size: 14px; font-weight: 400; }
 .lang { display: inline-flex; border: 1px solid #6b776e; border-radius: 8px; overflow: hidden; }
 .lang button { min-width: 40px; min-height: 36px; background: transparent; border: 0; color: #b9c4bb; font-size: 14px; }
 .lang button.on { background: #f2f4f1; color: var(--night); font-weight: 700; }
@@ -233,6 +237,7 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
   .top h1 { font-size: 19px; }
   .top nav { gap: 8px; }
   .top nav a, .reset-all .lbl { display: none; }
+  .toast, .manual-link { right: 14px; }
   .reset-all { padding: 0 11px; font-size: 18px; }
   main { display: flex; flex-direction: column; background: var(--surface); }
   .panel { display: contents; }

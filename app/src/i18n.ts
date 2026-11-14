@@ -126,6 +126,7 @@ const en = {
   resetView: "Back to the selected area", undoPoint: "Undo point", cancel: "Cancel",
   resetArea: "↺ Back to Paraguay", resetMonth: "↺ Current month", resetRange: "↺ Reset",
   resetAll: "↺ Reset all", resetAllTitle: "Back to the start: Paraguay, current month, this year",
+  copyLink: "Copy link", copyLinkTitle: "Copy a link to this exact view", linkCopied: "Link copied", linkCopyManual: "Copy this link",
   langLabel: "Idioma: español",
 };
 export type Dict = typeof en;
@@ -243,6 +244,7 @@ const es: Dict = {
   resetView: "Volver al área elegida", undoPoint: "Deshacer punto", cancel: "Cancelar",
   resetArea: "↺ Volver a Paraguay", resetMonth: "↺ Mes actual", resetRange: "↺ Restablecer",
   resetAll: "↺ Restablecer todo", resetAllTitle: "Volver al inicio: Paraguay, mes actual, este año",
+  copyLink: "Copiar enlace", copyLinkTitle: "Copiar un enlace a esta vista exacta", linkCopied: "Enlace copiado", linkCopyManual: "Copiá este enlace",
   langLabel: "Language: English",
 };
 

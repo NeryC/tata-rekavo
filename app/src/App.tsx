@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as H from "@core";
 import MapView from "./MapView";
 import Calendar, { type CalMode } from "./Calendar";
@@ -10,6 +10,8 @@ import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
   HOTSPOT_HEADER, loadData, regionOfCell, sourceOf, type AppData,
 } from "./data";
+import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
+import { indexToMonth, planRestore } from "./shareRestore";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang } from "./i18n";
 
 type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom";
@@ -42,14 +44,27 @@ export default function App() {
   const [estimate, setEstimate] = useState<number | null>(null);
   const [viewNonce, setViewNonce] = useState(0);
   const [mapMoved, setMapMoved] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [manualUrl, setManualUrl] = useState<string | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     loadData().then((d) => {
-      setData(d);
       const last = d.grid.nMonths - 1;
-      setMonth(last);
       const { year } = H.monthOf(d.grid.meta, last);
-      setRange([Math.max(0, H.indexOf(d.grid.meta, year, 1)), last]);
+      const defRange: [number, number] = [Math.max(0, H.indexOf(d.grid.meta, year, 1)), last];
+      // restore a shared link only here, once the grid is known, so months can be clamped to the data
+      const r = planRestore(d.grid.meta.months.first, d.grid.nMonths, decodeState(window.location.search), defRange);
+      setZoneKind(r.zone);
+      setCoords(r.coords);
+      if (r.coords) {
+        setPolygon(circleRing(r.coords.lat, r.coords.lon, r.coords.r));
+        setCoordsForm({ lat: String(r.coords.lat), lon: String(r.coords.lon), r: String(r.coords.r) });
+      } else setPolygon(r.poly);
+      setMonth(r.month);
+      setRange(r.range);
+      setCalMode(r.cal); setNaive(r.naive); setNewOnly(r.newOnly);
+      setData(d);
     }).catch((e) => setError(String(e)));
   }, []);
   useEffect(() => { document.documentElement.lang = lang; document.title = `Tata Rekavo · ${t.title}`; saveLang(lang); }, [lang, t]);
@@ -99,6 +114,47 @@ export default function App() {
     return () => { alive = false; };
   }, [grid, data, zoneCells, zoneSet, range]);
 
+  // the state a shared link carries; null until the initial restore has run
+  const shareQs = useMemo(() => {
+    if (!data) return null;
+    const first = data.grid.meta.months.first;
+    const lastI = data.grid.nMonths - 1;
+    const defStart = Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastI).year, 1));
+    const s: ShareState = { lang, cal: calMode, naive, newOnly };
+    if (zoneKind === "custom") {
+      if (coords) s.c = coords; else if (polygon) s.poly = polygon;
+      if (coords || polygon) s.zone = "custom";
+    } else s.zone = zoneKind;
+    if (month >= 0 && month !== lastI) s.m = indexToMonth(first, month);
+    if (range[0] !== defStart || range[1] !== lastI) s.range = [indexToMonth(first, range[0]), indexToMonth(first, range[1])];
+    return encodeState(s);
+  }, [data, lang, zoneKind, polygon, coords, month, range, calMode, naive, newOnly]);
+
+  useEffect(() => {
+    if (shareQs === null) return; // never overwrite the incoming URL before it has been restored
+    const id = window.setTimeout(() => {
+      try { window.history.replaceState(null, "", shareQs ? `?${shareQs}` : window.location.pathname); } catch { /* sandboxed */ }
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [shareQs]);
+
+  const flash = (msg: string) => {
+    setToast(msg);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2000);
+  };
+  const copyLink = async () => {
+    // build from state, not location.href: the writer is debounced
+    const url = `${window.location.origin}${window.location.pathname}${shareQs ? `?${shareQs}` : ""}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setManualUrl(null);
+      flash(t.linkCopied);
+    } catch {
+      setManualUrl(url); // http / old iOS: show a selected read-only field to copy by hand
+    }
+  };
+
   function resetAll() {
     if (!data) return;
     const lastM = data.grid.nMonths - 1;
@@ -139,6 +195,9 @@ export default function App() {
       <nav>
         <a href={`${REPO}#method`} target="_blank" rel="noreferrer">{t.method}</a>
         <a href={REPO} target="_blank" rel="noreferrer">{t.code}</a>
+        <button className="reset-all copy-link" onClick={() => void copyLink()} title={t.copyLinkTitle} aria-label={t.copyLinkTitle}>
+          <span aria-hidden>🔗</span><span className="lbl">{t.copyLink}</span>
+        </button>
         {changed && (
           <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle} aria-label={t.resetAllTitle}>
             <span aria-hidden>↺</span><span className="lbl">{t.resetAll.replace("↺ ", "")}</span>
@@ -149,6 +208,13 @@ export default function App() {
           <button className={lang === "es" ? "on" : ""} onClick={() => setLang("es")} aria-pressed={lang === "es"}>ES</button>
         </span>
       </nav>
+      {toast && <div className="toast" role="status">{toast}</div>}
+      {manualUrl && (
+        <label className="manual-link">{t.linkCopyManual}
+          <input readOnly value={manualUrl} onFocus={(e) => e.currentTarget.select()}
+            ref={(el) => { if (el) { el.focus(); el.select(); } }} onBlur={() => setManualUrl(null)} />
+        </label>
+      )}
     </header>
   );
 
@@ -196,7 +262,7 @@ export default function App() {
   const applyCoords = () => {
     const parse = (s: string) => parseFloat(s.replace(",", ".").replace("−", "-"));
     const lat = parse(coordsForm.lat), lon = parse(coordsForm.lon), r = parse(coordsForm.r);
-    const ok = lat >= -27.7 && lat <= -19.1 && lon >= -62.8 && lon <= -54.1 && r >= 5 && r <= 300;
+    const ok = validateCoords(lat, lon, r);
     setCoordsError(!ok);
     if (!ok) return;
     setDrawing(false);
