@@ -24,6 +24,8 @@ interface Props {
   values: Map<number, number>;
   zone: Set<number>;
   zoneBBox: [number, number, number, number];
+  /** changes whenever the app asks the map to go back to the zone view */
+  viewNonce: number;
   polygon: number[][] | null;
   hotspots: Hotspot[];
   newOnly: boolean;
@@ -42,6 +44,7 @@ export default function MapView(p: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
+  const homeBtn = useRef<HTMLButtonElement | null>(null);
   const [draft, setDraft] = useState<number[][]>([]);
   const draftRef = useRef<number[][]>([]);
   const props = useRef(p);
@@ -63,8 +66,32 @@ export default function MapView(p: Props) {
       const m = new maplibregl.Map({
         container: box.current, style, bounds: [-62.8, -27.7, -54.1, -19.1],
         fitBoundsOptions: { padding: 24 }, attributionControl: { compact: true },
+        locale: {
+          "NavigationControl.ZoomIn": props.current.i18n.t.zoomIn,
+          "NavigationControl.ZoomOut": props.current.i18n.t.zoomOut,
+          "NavigationControl.ResetBearing": props.current.i18n.t.resetNorth,
+        },
       });
-      m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+      // zoom + compass: the compass rotates with the map; clicking it points north and removes the tilt
+      m.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
+      // home button: back to the selected area, north up, no tilt
+      const home: maplibregl.IControl = {
+        onAdd: () => {
+          const div = document.createElement("div");
+          div.className = "maplibregl-ctrl maplibregl-ctrl-group";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "ctrl-home";
+          btn.textContent = "⌂";
+          btn.title = btn.ariaLabel = props.current.i18n.t.resetView;
+          btn.onclick = () => resetView();
+          div.appendChild(btn);
+          homeBtn.current = btn;
+          return div;
+        },
+        onRemove: () => { homeBtn.current = null; },
+      };
+      m.addControl(home, "top-right");
       m.on("load", () => {
         m.addSource("cells", { type: "geojson", data: empty });
         m.addSource("zone", { type: "geojson", data: empty });
@@ -122,6 +149,21 @@ export default function MapView(p: Props) {
     return () => { cancelled = true; map.current?.remove(); map.current = null; };
   }, []);
 
+  const resetView = () => {
+    const m = map.current;
+    if (!m) return;
+    m.fitBounds(props.current.zoneBBox, { padding: 40, bearing: 0, pitch: 0, duration: 600 });
+  };
+  const undo = () => {
+    draftRef.current = draftRef.current.slice(0, -1);
+    setDraft(draftRef.current);
+  };
+  const cancel = () => {
+    draftRef.current = [];
+    setDraft([]);
+    props.current.onCancelDraw();
+  };
+
   const finish = () => {
     // a double click also fires two clicks: drop consecutive duplicate points
     const pts = draftRef.current.filter((q, i, a) => i === 0 || Math.hypot(q[0] - a[i - 1][0], q[1] - a[i - 1][1]) > 1e-4);
@@ -139,7 +181,8 @@ export default function MapView(p: Props) {
     else { m.doubleClickZoom.enable(); m.getCanvas().style.cursor = ""; draftRef.current = []; setDraft([]); }
     const onKey = (ev: KeyboardEvent) => {
       if (!props.current.drawing) return;
-      if (ev.key === "Escape") { draftRef.current = []; setDraft([]); props.current.onCancelDraw(); }
+      if (ev.key === "Escape") cancel();
+      if ((ev.key === "z" && (ev.ctrlKey || ev.metaKey)) || ev.key === "Backspace") { ev.preventDefault(); undo(); }
       if (ev.key === "Enter") finish();
     };
     window.addEventListener("keydown", onKey);
@@ -179,8 +222,13 @@ export default function MapView(p: Props) {
   useEffect(() => {
     const m = map.current;
     if (!m || !ready) return;
-    m.fitBounds(p.zoneBBox, { padding: 40, duration: 600 });
-  }, [ready, p.zoneBBox]);
+    m.fitBounds(p.zoneBBox, { padding: 40, bearing: 0, pitch: 0, duration: 600 });
+  }, [ready, p.zoneBBox, p.viewNonce]);
+
+  // keep the home button tooltip in the current language
+  useEffect(() => {
+    if (homeBtn.current) homeBtn.current.title = homeBtn.current.ariaLabel = p.i18n.t.resetView;
+  }, [p.i18n, ready]);
 
   useEffect(() => {
     const m = map.current;
@@ -195,7 +243,9 @@ export default function MapView(p: Props) {
       <div ref={box} className="map" />
       {p.drawing && (
         <div className="draw-hint" role="status">
-          {t.drawHint}
+          <span>{t.drawHint}</span>
+          <button className="ghost" onClick={undo} disabled={!draft.length}>{t.undoPoint}</button>
+          <button className="ghost" onClick={cancel}>{t.cancel}</button>
           <button onClick={finish} disabled={draft.length < 3}>{t.finish(draft.length)}</button>
         </div>
       )}

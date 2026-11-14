@@ -65,7 +65,7 @@ const en = {
   footData: (last: string, to: string | null) => `Data: NASA FIRMS — MODIS Collection 6.1 (Terra, Aqua) and VIIRS 375 m (S-NPP, NOAA-20), vegetation fires only. Months up to ${last} from the standard-processing archives; later months from the FIRMS API${to ? ` (to ${to})` : ""}.`,
   footValidation: (a: number, b: number, c: number) => `Harmonization tested on held-out years: median monthly error ${a}% for Paraguay, ${b}% for the Chaco and ${c}% for the Oriental region.`,
   footHotspot: "A hotspot is a ~375 m–1 km pixel with active fire at the satellite's overpass, not a fire count. AI-assisted application. NASA Space Apps Challenge 2026 · Asunción.",
-  drawHint: "Click to add points · double-click or Enter to finish · Esc to cancel",
+  drawHint: "Click to add points · double-click or Enter to finish",
   finish: (n: number) => `Finish zone (${n} pts)`,
   mapLegend: (m: string) => `Hotspots per ~11 km cell · ${m}`,
   legendDots: (n: string) => `individual VIIRS hotspots (${n})`,
@@ -111,6 +111,10 @@ const en = {
     harmonizedBy: "🔄 Harmonized by Tata Rekavo",
     observedDirect: "🛰️ Direct VIIRS observation",
   },
+  zoomIn: "Zoom in", zoomOut: "Zoom out", resetNorth: "Reset north and tilt",
+  resetView: "Back to the selected area", undoPoint: "Undo point", cancel: "Cancel",
+  resetArea: "↺ Back to Paraguay", resetMonth: "↺ Current month", resetRange: "↺ Reset",
+  resetAll: "↺ Reset all", resetAllTitle: "Back to the start: Paraguay, current month, this year",
   langLabel: "Idioma: español",
 };
 export type Dict = typeof en;
@@ -168,7 +172,7 @@ const es: Dict = {
   footData: (last, to) => `Datos: NASA FIRMS — MODIS Colección 6.1 (Terra, Aqua) y VIIRS 375 m (S-NPP, NOAA-20), solo fuegos de vegetación. Meses hasta ${last} de los archivos de calidad científica; los siguientes, de la API de FIRMS${to ? ` (hasta ${to})` : ""}.`,
   footValidation: (a, b, c) => `Armonización probada con años escondidos: error mediano mensual de ${a}% para Paraguay, ${b}% para el Chaco y ${c}% para la Región Oriental.`,
   footHotspot: "Un foco es un píxel de ~375 m a 1 km con fuego activo al pasar el satélite, no un conteo de incendios. Aplicación hecha con asistencia de IA. NASA Space Apps Challenge 2026 · Asunción.",
-  drawHint: "Hacé clic para agregar puntos · doble clic o Enter para terminar · Esc para cancelar",
+  drawHint: "Hacé clic para agregar puntos · doble clic o Enter para terminar",
   finish: (n) => `Terminar zona (${n} puntos)`,
   mapLegend: (m) => `Focos por celda de ~11 km · ${m}`,
   legendDots: (n) => `focos VIIRS individuales (${n})`,
@@ -213,6 +217,10 @@ const es: Dict = {
     harmonizedBy: "🔄 Armonizado por Tata Rekavo",
     observedDirect: "🛰️ Observación directa VIIRS",
   },
+  zoomIn: "Acercar", zoomOut: "Alejar", resetNorth: "Volver al norte y quitar inclinación",
+  resetView: "Volver al área elegida", undoPoint: "Deshacer punto", cancel: "Cancelar",
+  resetArea: "↺ Volver a Paraguay", resetMonth: "↺ Mes actual", resetRange: "↺ Restablecer",
+  resetAll: "↺ Restablecer todo", resetAllTitle: "Volver al inicio: Paraguay, mes actual, este año",
   langLabel: "Language: English",
 };
 

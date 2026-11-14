@@ -40,6 +40,7 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<number | null>(null);
+  const [viewNonce, setViewNonce] = useState(0);
 
   useEffect(() => {
     loadData().then((d) => {
@@ -96,6 +97,17 @@ export default function App() {
     return () => { alive = false; };
   }, [grid, data, zoneCells, zoneSet, range]);
 
+  function resetAll() {
+    if (!data) return;
+    const lastM = data.grid.nMonths - 1;
+    setDrawing(false); setCoordsOpen(false); setCoordsError(false);
+    setZoneKind("paraguay"); setPolygon(null); setCoords(null);
+    setMonth(lastM);
+    setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
+    setCalMode("ratio"); setNaive(false); setNewOnly(false); setDlError(null);
+    setViewNonce((n) => n + 1);
+  }
+
   const header = (
     <header className="top">
       <div className="brand">
@@ -108,6 +120,7 @@ export default function App() {
       <nav>
         <a href={`${REPO}#method`} target="_blank" rel="noreferrer">{t.method}</a>
         <a href={REPO} target="_blank" rel="noreferrer">{t.code}</a>
+        {data && <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle}>{t.resetAll}</button>}
         <span className="lang" role="group" aria-label={t.langLabel}>
           <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")} aria-pressed={lang === "en"}>EN</button>
           <button className={lang === "es" ? "on" : ""} onClick={() => setLang("es")} aria-pressed={lang === "es"}>ES</button>
@@ -196,7 +209,7 @@ export default function App() {
           <aside className="panel">
             <section>
               <h2>{t.step1}</h2>
-              <div className="seg" role="group" aria-label={t.step1}>
+              <div className="seg area" role="group" aria-label={t.step1}>
                 {(["paraguay", "chaco", "oriental"] as const).map((k) => (
                   <button key={k} className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
                 ))}
@@ -214,6 +227,9 @@ export default function App() {
                 </div>
                 <p className={coordsError ? "dl-error" : "note"}>{coordsError ? t.coordsInvalid : t.coordsHelp}</p>
               </>)}
+              {(zoneKind !== "paraguay" || drawing || coordsOpen) && (
+                <button className="link" onClick={() => pickZone("paraguay")}>{t.resetArea}</button>
+              )}
               <p className="meta">{t.cellsArea(num(zoneCells.length), num(areaKm2(meta, zoneCells)))}
                 {small && zoneCells.length > 0 && <span className="warn">{t.smallArea}</span>}
                 {zoneCells.length === 0 && <span className="warn">{t.noCells}</span>}
@@ -229,6 +245,7 @@ export default function App() {
                 </select>
                 <button aria-label={t.next} onClick={() => setMonth(Math.min(last, month + 1))} disabled={month === last}>›</button>
               </div>
+              {month !== last && <button className="link" onClick={() => setMonth(last)}>{t.resetMonth}</button>}
             </section>
 
             <section className="verdict" style={{ borderColor: cls.color }} aria-live="polite">
@@ -272,7 +289,12 @@ export default function App() {
                 </select>
               </div>
               <div className="chips">
-                {Object.entries(presets).map(([k, r]) => <button key={k} onClick={() => setRange(r)}>{t.presets[k]}</button>)}
+                {Object.entries(presets).map(([k, r]) => (
+                  <button key={k} className={range[0] === r[0] && range[1] === r[1] ? "on" : ""} onClick={() => setRange(r)}>{t.presets[k]}</button>
+                ))}
+                {(range[0] !== presets.year[0] || range[1] !== presets.year[1]) && (
+                  <button className="reset" onClick={() => setRange(presets.year)}>{t.resetRange}</button>
+                )}
               </div>
             </section>
 
@@ -331,7 +353,7 @@ export default function App() {
             </footer>
           </aside>
 
-          <MapView grid={grid} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox}
+          <MapView grid={grid} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
             polygon={zoneKind === "custom" ? polygon : null} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)} />
