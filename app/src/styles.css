@@ -120,3 +120,14 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
   .panel { overflow: visible; border-right: 0; }
   .top nav { display: none; }
 }
+.legend-dots.new i { width: 9px; height: 9px; background: #2a78d6; box-shadow: 0 0 0 1.5px #fff, 0 0 0 2.5px rgba(11, 11, 11, 0.25); vertical-align: 0; }
+.lang { display: inline-flex; border: 1px solid #52514e; border-radius: 6px; overflow: hidden; }
+.lang button { background: transparent; border: 0; color: #c3c2b7; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+.lang button.on { background: #f0efec; color: #1d1b19; font-weight: 600; }
+.top nav { align-items: center; }
+.newplaces .stat { font-size: 13.5px; line-height: 1.45; margin: 0 0 8px; }
+.newplaces .stat b { color: #1c5cab; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: #2a78d6; }
+.dot-new { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #2a78d6; box-shadow: 0 0 0 1.5px #fff, 0 0 0 2.5px rgba(11,11,11,.25); margin-right: 6px; vertical-align: -1px; }
+@media (max-width: 860px) { .top nav { display: flex; } .top nav a { display: none; } }

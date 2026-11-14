@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import type { Grid } from "@core";
-import { cellPolygon, fmt, type Hotspot } from "./data";
+import { cellPolygon, type Hotspot } from "./data";
+import type { I18n } from "./i18n";
 
 // MapLibre 6 looks for its worker next to the library file; after bundling it lives in /assets
 maplibregl.setWorkerUrl(workerUrl);
@@ -25,6 +26,8 @@ interface Props {
   zoneBBox: [number, number, number, number];
   polygon: number[][] | null;
   hotspots: Hotspot[];
+  newOnly: boolean;
+  i18n: I18n;
   drawing: boolean;
   onDrawn: (ring: number[][]) => void;
   onCancelDraw: () => void;
@@ -34,6 +37,8 @@ type GJ = GeoJSON.FeatureCollection;
 const empty: GJ = { type: "FeatureCollection", features: [] };
 
 export default function MapView(p: Props) {
+  const { t, num } = p.i18n;
+  const nNew = p.hotspots.filter((h) => h.fresh).length;
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -74,9 +79,13 @@ export default function MapView(p: Props) {
             "fill-opacity": ["case", ["<=", ["get", "v"], 0], 0, ["==", ["get", "sel"], 1], 0.85, 0.22],
           },
         });
-        m.addLayer({ id: "hotspots", type: "circle", source: "hotspots",
+        m.addLayer({ id: "hotspots", type: "circle", source: "hotspots", filter: ["==", ["get", "fresh"], 0],
           paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 1.2, 9, 3], "circle-color": "#3d0c02",
                    "circle-opacity": 0.75 } });
+        // hotspots in places with no fire on record within ~1 km: drawn on top, larger, in a contrasting hue
+        m.addLayer({ id: "hotspots-new", type: "circle", source: "hotspots", filter: ["==", ["get", "fresh"], 1],
+          paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3.2, 9, 6], "circle-color": "#2a78d6",
+                   "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.2 } });
         m.addLayer({ id: "zone", type: "line", source: "zone",
           paint: { "line-color": "#0b0b0b", "line-width": 2, "line-dasharray": [2, 1.5] } });
         m.addLayer({ id: "draft-line", type: "line", source: "draft", filter: ["==", ["geometry-type"], "LineString"],
@@ -91,7 +100,7 @@ export default function MapView(p: Props) {
           if (!f) return;
           m.getCanvas().style.cursor = "default";
           popup.setLngLat(e.lngLat)
-            .setHTML(`<b>${fmt(Number(f.properties.v))}</b> hotspots<br><span>${props.current.monthLabel} · ~11 km cell</span>`)
+            .setHTML(`<b>${props.current.i18n.num(Number(f.properties.v))}</b> ${props.current.i18n.t.hotspots}<br><span>${props.current.i18n.t.popupCell(props.current.monthLabel)}</span>`)
             .addTo(m);
         });
         m.on("mouseleave", "cells", () => popup.remove());
@@ -154,9 +163,10 @@ export default function MapView(p: Props) {
     if (!m || !ready) return;
     (m.getSource("hotspots") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
-      features: p.hotspots.map((h) => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [h.lon, h.lat] } })),
+      features: p.hotspots.filter((h) => !p.newOnly || h.fresh)
+        .map((h) => ({ type: "Feature", properties: { fresh: h.fresh ? 1 : 0 }, geometry: { type: "Point", coordinates: [h.lon, h.lat] } })),
     });
-  }, [ready, p.hotspots]);
+  }, [ready, p.hotspots, p.newOnly]);
 
   useEffect(() => {
     const m = map.current;
@@ -185,16 +195,17 @@ export default function MapView(p: Props) {
       <div ref={box} className="map" />
       {p.drawing && (
         <div className="draw-hint" role="status">
-          Click to add points · double-click or Enter to finish · Esc to cancel
-          <button onClick={finish} disabled={draft.length < 3}>Finish zone ({draft.length} pts)</button>
+          {t.drawHint}
+          <button onClick={finish} disabled={draft.length < 3}>{t.finish(draft.length)}</button>
         </div>
       )}
-      <div className="map-legend" aria-label="Map legend">
-        <div className="legend-title">Hotspots per ~11 km cell · {p.monthLabel}</div>
+      <div className="map-legend">
+        <div className="legend-title">{t.mapLegend(p.monthLabel)}</div>
         <div className="legend-ramp">
           {CELL_RAMP.map(([v, c]) => (<span key={v}><i style={{ background: c }} />{v >= 1000 ? "1k+" : v}</span>))}
         </div>
-        {p.hotspots.length > 0 && <div className="legend-dots"><i /> individual VIIRS hotspots ({fmt(p.hotspots.length)})</div>}
+        {p.hotspots.length > 0 && !p.newOnly && <div className="legend-dots"><i /> {t.legendDots(num(p.hotspots.length))}</div>}
+        {p.hotspots.length > 0 && <div className="legend-dots new"><i /> {t.legendNew(num(nNew))}</div>}
       </div>
     </div>
   );

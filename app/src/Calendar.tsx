@@ -1,10 +1,7 @@
 import { useMemo, useState } from "react";
 import * as H from "@core";
 import type { Grid } from "@core";
-import { fmt } from "./data";
-
-const MONTHS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+import { useI18n } from "./i18n";
 
 // diverging blue <-> red around "normal" (ratio to the median of the same calendar month)
 export const BINS: { max: number; color: string; label: string }[] = [
@@ -29,17 +26,20 @@ interface Props {
 }
 
 export default function Calendar({ grid, series, coverage, selected, onSelect }: Props) {
+  const i18n = useI18n();
+  const { t, num } = i18n;
   const cal = useMemo(() => H.calendar(grid, series), [grid, series]);
+  const binLabel = (l: string) => (l === "≈ normal" ? t.normalBin : i18n.lang === "es" ? l.replace(".", ",") : l);
   const [tip, setTip] = useState<{ x: number; y: number; html: string[] } | null>(null);
   const rows = [...cal.rows].reverse();
 
   return (
     <div className="calendar" onMouseLeave={() => setTip(null)}>
-      <div className="cal-grid" role="grid" aria-label="Burning calendar: months by year, colored by ratio to the usual level">
+      <div className="cal-grid" role="grid" aria-label={t.calendarAria}>
         <div className="cal-head" role="row">
           <span />
-          {MONTHS.map((l, i) => <span key={i} className="cal-mh" role="columnheader" aria-label={MONTH_NAMES[i]}>{l}</span>)}
-          <span className="cal-mh total">year</span>
+          {i18n.initials.map((l, i) => <span key={i} className="cal-mh" role="columnheader" aria-label={i18n.monthShort(i + 1)}>{l}</span>)}
+          <span className="cal-mh total">{t.year}</span>
         </div>
         {rows.map((row) => (
           <div className="cal-row" role="row" key={row.year}>
@@ -53,10 +53,10 @@ export default function Calendar({ grid, series, coverage, selected, onSelect }:
               const b = binOf(ratio);
               const err = c.relativeError;
               const lines = [
-                `${MONTH_NAMES[i]} ${row.year}${cov < 1 ? ` (first ${Math.round(cov * 100)}% of month)` : ""}`,
-                `${fmt(c.value)} hotspots${err > 0 ? ` ±${Math.round(err * 100)}%` : ""}`,
-                `×${ratio.toFixed(2)} vs usual ${MONTH_NAMES[i]} (${fmt(med)})`,
-                err > 0 ? "translated from MODIS Aqua" : "observed by VIIRS",
+                `${i18n.monthLabel(row.year, i + 1)}${cov < 1 ? t.calFirstPct(Math.round(cov * 100)) : ""}`,
+                `${num(c.value)} ${t.hotspots}${err > 0 ? ` ±${Math.round(err * 100)}%` : ""}`,
+                t.calVsUsual(i18n.ratio(ratio), i18n.monthShort(i + 1), num(med)),
+                err > 0 ? t.translatedFrom : t.observedBy,
               ];
               return (
                 <button key={i} role="gridcell" aria-label={lines.join(", ")} aria-selected={c.m === selected}
@@ -66,14 +66,14 @@ export default function Calendar({ grid, series, coverage, selected, onSelect }:
                   onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: lines })} />
               );
             })}
-            <span className="cal-total">{row.total >= 1000 ? `${Math.round(row.total / 1000)}k` : fmt(row.total)}</span>
+            <span className="cal-total">{row.total >= 1000 ? `${Math.round(row.total / 1000)}k` : num(row.total)}</span>
           </div>
         ))}
       </div>
-      <div className="cal-legend" aria-label="Calendar legend">
-        {BINS.map((b) => <span key={b.label}><i style={{ background: b.color }} />{b.label}</span>)}
+      <div className="cal-legend">
+        {BINS.map((b) => <span key={b.label}><i style={{ background: b.color }} />{binLabel(b.label)}</span>)}
       </div>
-      <p className="note">Each square compares a month with the median of the same month over 2002–2026. Hatched squares (before Feb 2012) are reconstructed from MODIS.</p>
+      <p className="note">{t.calNote}</p>
       {tip && (
         <div className="tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>
           <b>{tip.html[0]}</b>{tip.html.slice(1).map((l) => <div key={l}>{l}</div>)}

@@ -1,33 +1,66 @@
 import * as H from "@core";
 import type { CurrentMeta, Grid, GridMeta } from "@core";
+import type { I18n } from "./i18n";
 
-export interface Hotspot { lon: number; lat: number; date: string; m: number; frp: number; cell: number; raw: string }
-export interface AppData { grid: Grid; current: CurrentMeta | null; hotspotsHeader: string; hotspots: Hotspot[] }
+export interface Hotspot {
+  lon: number; lat: number; date: string; m: number; frp: number; cell: number;
+  /** no hotspot from any sensor within ~1 km (same or neighbouring 0.01-degree cell), Jul 2002 - Dec 2025 */
+  fresh: boolean;
+  raw: string;
+}
+export interface AppData { grid: Grid; current: CurrentMeta | null; hotspotsHeader: string; hotspots: Hotspot[]; historyPeriod: string }
 
 const url = (f: string) => `${import.meta.env.BASE_URL}${f}`;
 
+function b64ToBytes(b64: string) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+interface BurnHistory { deg: number; lat0: number; lon0: number; rows: number; cols: number; period: string; last_year_minus_2000_b64: string }
+
+/** true when no hotspot was ever recorded in the ~1 km cell of (lon, lat) or its 8 neighbours */
+function makeFreshTest(bh: BurnHistory) {
+  const last = b64ToBytes(bh.last_year_minus_2000_b64);
+  return (lon: number, lat: number) => {
+    const r = Math.floor((lat - bh.lat0) / bh.deg), c = Math.floor((lon - bh.lon0) / bh.deg);
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const rr = r + dr, cc = c + dc;
+      if (rr < 0 || cc < 0 || rr >= bh.rows || cc >= bh.cols) continue;
+      if (last[rr * bh.cols + cc]) return false;
+    }
+    return true;
+  };
+}
+
 export async function loadData(): Promise<AppData> {
-  const [gridJson, currentJson] = await Promise.all([
+  const [gridJson, currentJson, burnJson] = await Promise.all([
     fetch(url("grid.json")).then((r) => r.json()),
     fetch(url("current.json")).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetch(url("burn_history.json")).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<BurnHistory | null>,
   ]);
   const grid = H.decodeGrid(gridJson, currentJson);
+  const isFresh = burnJson ? makeFreshTest(burnJson) : () => false;
   let hotspotsHeader = "";
   let hotspots: Hotspot[] = [];
   try {
     const txt = await fetch(url("current_hotspots.csv")).then((r) => (r.ok ? r.text() : ""));
     const lines = txt.trim().split("\n");
-    hotspotsHeader = lines[0];
-    const cols = hotspotsHeader.split(",");
+    hotspotsHeader = lines[0] + ",new_place";
+    const cols = lines[0].split(",");
     const iLat = cols.indexOf("latitude"), iLon = cols.indexOf("longitude"), iDate = cols.indexOf("acq_date"), iFrp = cols.indexOf("frp");
     hotspots = lines.slice(1).map((line) => {
       const f = line.split(",");
       const lat = +f[iLat], lon = +f[iLon], date = f[iDate];
       const [y, mo] = date.split("-").map(Number);
-      return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), raw: line };
+      const fresh = isFresh(lon, lat);
+      return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh,
+               raw: `${line},${fresh ? 1 : 0}` };
     });
   } catch { /* hotspots are optional */ }
-  return { grid, current: currentJson ? currentJson.meta : null, hotspotsHeader, hotspots };
+  return { grid, current: currentJson ? currentJson.meta : null, hotspotsHeader, hotspots, historyPeriod: burnJson?.period ?? "" };
 }
 
 function interp(x: number, xs: number[], ys: number[]) {
@@ -67,19 +100,19 @@ export function areaKm2(meta: GridMeta, ids: number[]) {
   return ids.reduce((s, id) => s + (d * 111.32) * (d * 111.32 * Math.cos((H.cellCenter(meta, id)[1] * Math.PI) / 180)), 0);
 }
 
-const PRODUCT_NAMES: Record<string, string> = {
-  VIIRS_SNPP_SP: "VIIRS S-NPP", VIIRS_SNPP_NRT: "VIIRS S-NPP (near real-time)",
-  VIIRS_NOAA20_SP: "VIIRS NOAA-20", VIIRS_NOAA20_NRT: "VIIRS NOAA-20 (near real-time)",
-  VIIRS_NOAA21_SP: "VIIRS NOAA-21", VIIRS_NOAA21_NRT: "VIIRS NOAA-21 (near real-time)",
-};
+const SATS: Record<string, string> = { SNPP: "VIIRS S-NPP", NOAA20: "VIIRS NOAA-20", NOAA21: "VIIRS NOAA-21" };
 
 /** Plain-language description of where a month's numbers come from. */
-export function sourceOf(meta: GridMeta, current: CurrentMeta | null, m: number): { label: string; translated: boolean } {
-  if (m < meta.months.viirs_start_index) return { label: "MODIS Aqua, translated to VIIRS-equivalent", translated: true };
-  if (m < meta.months.count) return { label: "VIIRS S-NPP observed (outage days filled with NOAA-20)", translated: false };
+export function sourceOf(meta: GridMeta, current: CurrentMeta | null, m: number, i: I18n): string {
+  if (m < meta.months.viirs_start_index) return i.t.srcTranslated;
+  if (m < meta.months.count) return i.t.srcObserved;
   const p = current?.month_products?.[String(m)] ?? {};
-  const names = Object.entries(p).sort((a, b) => b[1] - a[1]).map(([k, d]) => `${PRODUCT_NAMES[k] ?? k}${Object.keys(p).length > 1 ? ` (${d} d)` : ""}`);
-  return { label: names.length ? names.join(" + ") : "VIIRS", translated: false };
+  const several = Object.keys(p).length > 1;
+  const names = Object.entries(p).sort((a, b) => b[1] - a[1]).map(([k, d]) => {
+    const [, sat, kind] = k.split("_");
+    return `${SATS[sat] ?? sat}${kind === "NRT" ? ` (${i.t.nrt})` : ""}${several ? ` · ${d} ${i.t.days}` : ""}`;
+  });
+  return names.length ? names.join(" + ") : "VIIRS";
 }
 
 export function download(name: string, text: string) {
@@ -90,5 +123,3 @@ export function download(name: string, text: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-
-export const fmt = (n: number) => Math.round(n).toLocaleString("en-US");

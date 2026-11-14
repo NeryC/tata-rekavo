@@ -91,6 +91,8 @@ The approach follows the same principle used in the literature to bridge the MOD
 - **Burning calendar:** years × months, colored by the ratio to the usual level. Months before 2012, reconstructed from MODIS, are hatched.
 - **Hotspots per year:** a toggle between the harmonized record and the raw sensors stitched together, which shows the false 2012 jump.
 - **Map:** hotspots per ~11 km cell for the month, plus the individual VIIRS hotspots for 2026.
+- **Fire in new places:** 2026 hotspots with no hotspot from any sensor within ~1 km (same or neighbouring 0.01° cell) from July 2002 to December 2025. That is about 2% of them. They are highlighted on the map and flagged in the CSV (`new_place`). Comparing exact cells instead would flag ~10%, which mostly reflects pixel geolocation offsets, so the neighbourhood is required. Hotspots right at the border may be over-flagged, because the history only covers Paraguay.
+- **English / Spanish** interface (EN/ES toggle; it follows the browser language by default).
 - **CSV downloads:** the monthly series of the area, and the 2026 hotspots inside it.
 
 Stack: React + TypeScript + Vite + MapLibre GL. It is a static site with no backend. It reads `data/app/` and uses the same `harmonized.js` the pipeline tests run against.
