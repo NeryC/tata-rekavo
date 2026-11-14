@@ -41,7 +41,13 @@ export default function ValidationPanel({ meta }: { meta: Meta }) {
         )}
         {v.spearman !== null && <p>{t.trustSpearman(dec(v.spearman, 3), num(v.nMonths))}</p>}
         <p>{t.trustRecent}</p>
-        {imgOk && <img src={url("validation.png")} loading="lazy" alt={t.validationAlt} onError={() => setImgOk(false)} />}
+        <p>{t.trustEarly}</p>
+        {imgOk && (
+          <a className="trust-fig" href={url("validation.png")} target="_blank" rel="noopener">
+            <img src={url("validation.png")} loading="lazy" alt={t.validationAlt} onError={() => setImgOk(false)} />
+            <span>{t.trustOpen} ↗</span>
+          </a>
+        )}
       </div>
     </details>
   );

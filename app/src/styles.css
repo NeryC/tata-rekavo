@@ -278,3 +278,7 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .trust th:first-child, .trust td:first-child { text-align: left; }
 .trust tbody th { font-weight: 600; color: var(--ink); }
 .trust img { display: block; max-width: 100%; height: auto; margin-top: 10px; border-radius: 4px; }
+.trust-fig { display: block; margin-top: 10px; color: var(--blue); font-size: 14px; text-underline-offset: 3px; }
+.trust-fig img { margin-top: 0; }
+.trust-fig span { display: inline-block; margin-top: 6px; text-decoration: underline; }
+.verdict .trust-fig:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
