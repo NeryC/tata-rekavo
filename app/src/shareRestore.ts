@@ -49,7 +49,8 @@ export function closeRing(poly: number[][]): number[][] {
 }
 
 export type Restored = {
-  zone: "paraguay" | "chaco" | "oriental" | "custom";
+  zone: "paraguay" | "chaco" | "oriental" | "custom" | "department";
+  dep: string | null; // set when zone === "department"
   coords: Coords | null;
   poly: number[][] | null; // set when zone === "custom" and no coords
   month: number;
@@ -59,16 +60,24 @@ export type Restored = {
   newOnly: boolean;
 };
 
-export function planRestore(first: string, nMonths: number, s: ShareState, defaultRange: [number, number]): Restored {
+/**
+ * @param departmentIds ids of the loaded departments; null when departments.json is not available
+ *   (then a department link falls back to Paraguay, like an unknown id does).
+ */
+export function planRestore(first: string, nMonths: number, s: ShareState, defaultRange: [number, number],
+  departmentIds: readonly string[] | null = null): Restored {
   let zone: Restored["zone"] = "paraguay";
+  let dep: string | null = null;
   let coords: Coords | null = null;
   let poly: number[][] | null = null;
   if (s.c) { zone = "custom"; coords = s.c; }
   else if (s.poly && polyInBounds(s.poly)) { zone = "custom"; poly = closeRing(s.poly); }
   else if (s.zone === "chaco" || s.zone === "oriental") zone = s.zone;
-  // "department" arrives in a later plan; custom without geometry has nothing to draw: both stay Paraguay
+  else if (s.zone === "department" && s.dep && departmentIds?.includes(s.dep)) { zone = "department"; dep = s.dep; }
+  // custom without geometry has nothing to draw, and a department that is unknown or could not be loaded
+  // has no cells: both stay Paraguay
   return {
-    zone, coords, poly,
+    zone, dep, coords, poly,
     month: monthFromLink(first, s.m, nMonths),
     range: rangeFromLink(first, s.range, nMonths, defaultRange),
     cal: s.cal ?? "ratio",

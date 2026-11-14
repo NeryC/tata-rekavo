@@ -42,12 +42,35 @@ test("closeRing closes an open ring and leaves a closed one alone", () => {
 
 test("planRestore: empty state gives the defaults", () => {
   const r = planRestore(FIRST, N, {}, DEF);
-  assert.deepEqual(r, { zone: "paraguay", coords: null, poly: null, month: 149, range: DEF, cal: "ratio", naive: false, newOnly: false });
+  assert.deepEqual(r, { zone: "paraguay", dep: null, coords: null, poly: null, month: 149, range: DEF, cal: "ratio", naive: false, newOnly: false });
 });
 
-test("planRestore: department and bare custom fall back to Paraguay", () => {
-  assert.equal(planRestore(FIRST, N, { zone: "department", dep: "PY-11" }, DEF).zone, "paraguay");
+test("planRestore: bare custom falls back to Paraguay", () => {
   assert.equal(planRestore(FIRST, N, { zone: "custom" }, DEF).zone, "paraguay");
+});
+
+const DEPS = ["boqueron", "alto-paraguay", "central"];
+
+test("planRestore: a known department is restored once departments are loaded", () => {
+  const r = planRestore(FIRST, N, { zone: "department", dep: "boqueron", m: "2012-03" }, DEF, DEPS);
+  assert.deepEqual([r.zone, r.dep, r.month, r.coords, r.poly], ["department", "boqueron", 2, null, null]);
+});
+
+test("planRestore: department falls back to Paraguay when departments are missing, unknown or the link is incomplete", () => {
+  const link = { zone: "department" as const, dep: "boqueron" };
+  for (const ids of [null, [], ["central"]]) {
+    const r = planRestore(FIRST, N, link, DEF, ids);
+    assert.deepEqual([r.zone, r.dep], ["paraguay", null]);
+  }
+  assert.equal(planRestore(FIRST, N, { zone: "department" }, DEF, DEPS).zone, "paraguay");
+  assert.equal(planRestore(FIRST, N, { dep: "boqueron" }, DEF, DEPS).zone, "paraguay"); // dep alone is not a department link
+  assert.equal(planRestore(FIRST, N, { zone: "department", dep: "PY-11" }, DEF).zone, "paraguay");
+});
+
+test("planRestore: coords and poly beat a department", () => {
+  const c = { lat: -22.35, lon: -60.03, r: 25 };
+  const r = planRestore(FIRST, N, { zone: "department", dep: "boqueron", c }, DEF, DEPS);
+  assert.deepEqual([r.zone, r.dep], ["custom", null]);
 });
 
 test("planRestore: chaco, coords beat poly, poly out of bounds dropped", () => {

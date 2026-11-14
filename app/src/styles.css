@@ -282,3 +282,41 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .trust-fig img { margin-top: 0; }
 .trust-fig span { display: inline-block; margin-top: 6px; text-decoration: underline; }
 .verdict .trust-fig:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+/* ---------- department ranking: where is it abnormal ---------- */
+.dep-active { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; padding: 6px 12px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 14px; font-weight: 600; }
+.ranking summary { width: auto; text-decoration: none; list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.ranking summary::-webkit-details-marker { display: none; }
+.ranking summary::before { content: "▸"; flex-shrink: 0; color: var(--ink-2); transition: transform 0.15s; }
+.ranking details[open] > summary::before { transform: rotate(90deg); }
+.ranking summary h2 { margin: 0; }
+.ranking details { margin-top: 0; }
+.ranking .note { max-width: 62ch; }
+.rk-partial { margin-top: 8px; font-size: 13px; color: var(--ink-2); }
+.rk-partial::before { content: "◐ "; }
+.rk-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.rk-row { width: 100%; min-height: 56px; display: grid; grid-template-columns: 1fr auto auto; grid-template-areas: "name ratio chip" "sub sub sub"; align-items: center; gap: 2px 10px; padding: 8px 12px; text-align: left; border: 1px solid var(--edge); border-radius: 10px; background: #fff; color: var(--ink); }
+.rk-row:hover { border-color: var(--ink); background: var(--plane); }
+.rk-row.sel { border: 2px solid var(--ink); padding: 7px 11px; background: var(--plane); }
+.rk-name { grid-area: name; font-size: 16px; font-weight: 700; }
+.rk-ratio { grid-area: ratio; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rk-ratio small { font-size: 12.5px; font-weight: 400; color: var(--ink-2); }
+.rk-chip { grid-area: chip; padding: 3px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: #fff; background: var(--v-normal); white-space: nowrap; }
+.rk-chip.c-low { background: var(--v-low); }
+.rk-chip.c-high { background: var(--v-high); }
+.rk-chip.c-extreme { background: var(--v-extreme); }
+.rk-tag { grid-area: ratio / ratio / chip / chip; justify-self: end; font-size: 12.5px; color: var(--muted); border: 1px dashed var(--edge); border-radius: 999px; padding: 2px 9px; }
+.rk-sub { grid-area: sub; font-size: 13px; color: var(--ink-2); }
+.rk-row.low { background: var(--plane); border-style: dashed; }
+.rk-row.low .rk-name { font-weight: 600; color: var(--muted); }
+.rk-row.low .rk-sub { color: var(--muted); }
+.rk-foot { font-size: 13px; }
+@media (max-width: 860px) {
+  .panel > section.ranking { order: 3; margin: 0 16px 16px; padding: 12px 0; border-top: 1px solid var(--rule); border-bottom: 0; }
+}
+@media (max-width: 420px) {
+  .rk-row { grid-template-columns: 1fr auto; grid-template-areas: "name ratio" "chip chip" "sub sub"; }
+  .rk-chip { justify-self: start; }
+  .rk-tag { grid-area: ratio; }
+}
+.ranking summary h2 { color: var(--ink); }

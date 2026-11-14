@@ -26,7 +26,8 @@ interface Props {
   zoneBBox: [number, number, number, number];
   /** changes whenever the app asks the map to go back to the zone view */
   viewNonce: number;
-  polygon: number[][] | null;
+  /** the selected zone's outline (a department boundary or the drawn polygon), if it has one */
+  outline: GeoJSON.Geometry | null;
   hotspots: Hotspot[];
   newOnly: boolean;
   i18n: I18n;
@@ -230,10 +231,10 @@ export default function MapView(p: Props) {
   useEffect(() => {
     const m = map.current;
     if (!m || !ready) return;
-    (m.getSource("zone") as maplibregl.GeoJSONSource).setData(p.polygon
-      ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: p.polygon } }] }
+    (m.getSource("zone") as maplibregl.GeoJSONSource).setData(p.outline
+      ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: p.outline }] }
       : empty);
-  }, [ready, p.polygon]);
+  }, [ready, p.outline]);
 
   useEffect(() => {
     const m = map.current;

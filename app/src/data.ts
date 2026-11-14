@@ -1,5 +1,5 @@
 import * as H from "@core";
-import type { CurrentMeta, Grid, GridMeta } from "@core";
+import type { CurrentMeta, DepartmentDef, Grid, GridMeta } from "@core";
 import type { I18n } from "./i18n";
 
 export interface Hotspot {
@@ -36,6 +36,29 @@ function makeFreshTest(bh: BurnHistory) {
     }
     return true;
   };
+}
+
+export interface Department extends DepartmentDef {
+  bbox: [number, number, number, number]; // [w, s, e, n]
+  geometry: GeoJSON.MultiPolygon;
+}
+export interface DepartmentsFile {
+  meta: { source: string; license: string; url: string; retrieved: string; note: string };
+  departments: Department[];
+}
+
+let departmentsPromise: Promise<DepartmentsFile | null> | null = null;
+/** departments.json, fetched once. Resolves to null when it is missing or malformed: the app works without it. */
+export function loadDepartments(): Promise<DepartmentsFile | null> {
+  departmentsPromise ??= fetch(url("departments.json"))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j): DepartmentsFile | null => {
+      const ok = j && Array.isArray(j.departments) && j.departments.length > 0
+        && j.departments.every((d: Department) => d && typeof d.id === "string" && Array.isArray(d.cells) && Array.isArray(d.bbox) && d.geometry);
+      return ok ? (j as DepartmentsFile) : null;
+    })
+    .catch(() => null);
+  return departmentsPromise;
 }
 
 export async function loadData(): Promise<AppData> {

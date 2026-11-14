@@ -4,22 +4,24 @@ import MapView from "./MapView";
 import Calendar, { type CalMode } from "./Calendar";
 import YearChart from "./YearChart";
 import ValidationPanel from "./ValidationPanel";
+import DepartmentRanking from "./DepartmentRanking";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadData, regionOfCell, sourceOf, type AppData,
+  HOTSPOT_HEADER, loadData, loadDepartments, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
 } from "./data";
 import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
 import { indexToMonth, planRestore } from "./shareRestore";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang } from "./i18n";
 
-type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom";
+type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom" | "department";
 const CLASS_STYLE: Record<string, { icon: string }> = {
   low: { icon: "↓" }, normal: { icon: "≈" }, high: { icon: "↑" }, extreme: { icon: "▲" },
 };
 const REPO = "https://github.com/NeryC/tata-rekavo";
+const GEOBOUNDARIES = "https://www.geoboundaries.org/";
 const MAX_ROWS = 1_500_000;
 
 export default function App() {
@@ -29,6 +31,8 @@ export default function App() {
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoneKind, setZoneKind] = useState<ZoneKind>("paraguay");
+  const [departments, setDepartments] = useState<DepartmentsFile | null>(null); // null until loaded, or when it failed
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [polygon, setPolygon] = useState<number[][] | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
   const [coordsOpen, setCoordsOpen] = useState(false);
@@ -50,13 +54,19 @@ export default function App() {
   const toastTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    loadData().then((d) => {
+    const depsLoad = loadDepartments(); // lazy and optional: starts with the grid, never blocks it
+    void depsLoad.then(setDepartments);
+    loadData().then(async (d) => {
+      // a shared department link has to wait for departments.json, or it would restore as Paraguay
+      const link = decodeState(window.location.search);
+      const deps = link.zone === "department" ? await depsLoad : null;
       const last = d.grid.nMonths - 1;
       const { year } = H.monthOf(d.grid.meta, last);
       const defRange: [number, number] = [Math.max(0, H.indexOf(d.grid.meta, year, 1)), last];
       // restore a shared link only here, once the grid is known, so months can be clamped to the data
-      const r = planRestore(d.grid.meta.months.first, d.grid.nMonths, decodeState(window.location.search), defRange);
+      const r = planRestore(d.grid.meta.months.first, d.grid.nMonths, link, defRange, deps ? deps.departments.map((x) => x.id) : null);
       setZoneKind(r.zone);
+      setDepartmentId(r.dep);
       setCoords(r.coords);
       if (r.coords) {
         setPolygon(circleRing(r.coords.lat, r.coords.lon, r.coords.r));
@@ -77,14 +87,22 @@ export default function App() {
     return r;
   }, [grid]);
 
+  const department = useMemo(
+    () => (zoneKind === "department" && departmentId ? departments?.departments.find((d) => d.id === departmentId) ?? null : null),
+    [zoneKind, departmentId, departments]);
+
   const zoneCells = useMemo(() => {
     if (!grid) return [];
+    if (zoneKind === "department" && department) return department.cells;
     if (zoneKind === "custom" && polygon) return H.cellsInPolygon(grid, polygon);
     if (zoneKind === "chaco" || zoneKind === "oriental") return [...grid.cells.keys()].filter((i) => regionOf.get(i) === zoneKind);
     return [...grid.cells.keys()];
-  }, [grid, zoneKind, polygon, regionOf]);
+  }, [grid, zoneKind, department, polygon, regionOf]);
   const zoneSet = useMemo(() => new Set(zoneCells), [zoneCells]);
-  const zoneBBox = useMemo(() => (grid && zoneCells.length ? bboxOfCells(grid.meta, zoneCells) : [-62.8, -27.7, -54.1, -19.1] as [number, number, number, number]), [grid, zoneCells]);
+  const zoneBBox = useMemo(() => (department ? department.bbox : grid && zoneCells.length ? bboxOfCells(grid.meta, zoneCells) : [-62.8, -27.7, -54.1, -19.1] as [number, number, number, number]), [grid, zoneCells, department]);
+  // what the map outlines: the department boundary or the hand-made polygon
+  const outline = useMemo<GeoJSON.Geometry | null>(() => (department ? department.geometry
+    : zoneKind === "custom" && polygon ? { type: "LineString", coordinates: polygon } : null), [department, zoneKind, polygon]);
   const series = useMemo(() => (grid ? H.zoneSeries(grid, zoneCells) : null), [grid, zoneCells]);
   useEffect(() => { setMapMoved(false); }, [zoneBBox]);
   const coverage = useMemo(() => (m: number) => (grid ? H.monthCoverage(grid.meta, m, data?.current ?? null) : 1), [grid, data]);
@@ -100,6 +118,9 @@ export default function App() {
   }, [grid, month]);
   const monthHotspots = useMemo(() => (data ? data.hotspots.filter((h) => h.m === month) : []), [data, month]);
   const zoneMonthHotspots = useMemo(() => monthHotspots.filter((h) => zoneSet.has(h.cell)), [monthHotspots, zoneSet]);
+  const ranking = useMemo(
+    () => (grid && departments && month >= 0 ? H.departmentRanking(grid, departments.departments, month, coverage(month)) : null),
+    [grid, departments, month, coverage]);
   const analytics = useMemo(() => (grid && series ? rangeAnalytics(grid, series, coverage, range[0], range[1]) : null), [grid, series, coverage, range]);
 
   // estimated size of the hotspot download for this area and range
@@ -125,11 +146,13 @@ export default function App() {
     if (zoneKind === "custom") {
       if (coords) s.c = coords; else if (polygon) s.poly = polygon;
       if (coords || polygon) s.zone = "custom";
+    } else if (zoneKind === "department") {
+      if (department) { s.zone = "department"; s.dep = department.id; }
     } else s.zone = zoneKind;
     if (month >= 0 && month !== lastI) s.m = indexToMonth(first, month);
     if (range[0] !== defStart || range[1] !== lastI) s.range = [indexToMonth(first, range[0]), indexToMonth(first, range[1])];
     return encodeState(s);
-  }, [data, lang, zoneKind, polygon, coords, month, range, calMode, naive, newOnly]);
+  }, [data, lang, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly]);
 
   useEffect(() => {
     if (shareQs === null) return; // never overwrite the incoming URL before it has been restored
@@ -160,7 +183,7 @@ export default function App() {
     if (!data) return;
     const lastM = data.grid.nMonths - 1;
     setDrawing(false); setCoordsOpen(false); setCoordsError(false);
-    setZoneKind("paraguay"); setPolygon(null); setCoords(null);
+    setZoneKind("paraguay"); setDepartmentId(null); setPolygon(null); setCoords(null);
     setMonth(lastM);
     setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
     setCalMode("ratio"); setNaive(false); setNewOnly(false); setDlError(null);
@@ -238,7 +261,8 @@ export default function App() {
   const nNew = zoneMonthHotspots.filter((h) => h.fresh).length;
   const pctNew = zoneMonthHotspots.length ? (100 * nNew) / zoneMonthHotspots.length : 0;
   const zoneLabel = zoneKind === "custom" && coords
-    ? t.zoneCoords(coords.lat.toFixed(2), coords.lon.toFixed(2), String(coords.r)) : t.zoneIn[zoneKind];
+    ? t.zoneCoords(coords.lat.toFixed(2), coords.lon.toFixed(2), String(coords.r))
+    : zoneKind === "department" ? t.zoneDept(department?.name ?? "") : t.zoneIn[zoneKind];
   const rangeLabel = `${ml(range[0])} – ${ml(range[1])}`;
   const rangeNew = data.hotspots.filter((h) => h.fresh && h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).length;
   const lastYear = H.monthOf(meta, last).year;
@@ -251,7 +275,7 @@ export default function App() {
   };
   const tooMany = (estimate ?? 0) > MAX_ROWS;
   const tag = (m: number) => { const o = H.monthOf(meta, m); return `${o.year}-${String(o.month).padStart(2, "0")}`; };
-  const fileTag = `${zoneKind}_${tag(range[0])}_${tag(range[1])}`;
+  const fileTag = `${zoneKind === "department" && department ? department.id : zoneKind}_${tag(range[0])}_${tag(range[1])}`;
   const analyticsLines = [
     t.rangeVsTypical(i18n.ratio(analytics.ratio), num(analytics.typical)),
     ...(analytics.peak.m >= 0 ? [t.rangePeak(ml(analytics.peak.m), num(analytics.peak.v))] : []),
@@ -259,7 +283,16 @@ export default function App() {
     ...(rangeNew ? [t.rangeNew(num(rangeNew))] : []),
   ];
 
-  const pickZone = (k: ZoneKind) => { setDrawing(false); setCoordsOpen(false); setZoneKind(k); if (k !== "custom") { setPolygon(null); setCoords(null); } };
+  const pickZone = (k: ZoneKind) => { setDrawing(false); setCoordsOpen(false); setZoneKind(k); setDepartmentId(null); if (k !== "custom") { setPolygon(null); setCoords(null); } };
+  const pickDepartment = (id: string | null) => {
+    if (!id) { pickZone("paraguay"); return; }
+    setDrawing(false); setCoordsOpen(false); setPolygon(null); setCoords(null);
+    setDepartmentId(id); setZoneKind("department");
+    // stacked phone layout: the answer sits above the list, so bring it into view (on desktop it is already beside the map)
+    if (window.matchMedia("(max-width: 860px)").matches) {
+      requestAnimationFrame(() => document.querySelector(".verdict")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    }
+  };
   const applyCoords = () => {
     const parse = (s: string) => parseFloat(s.replace(",", ".").replace("−", "-"));
     const lat = parse(coordsForm.lat), lon = parse(coordsForm.lon), r = parse(coordsForm.r);
@@ -269,6 +302,7 @@ export default function App() {
     setDrawing(false);
     setCoords({ lat, lon, r });
     setPolygon(circleRing(lat, lon, r));
+    setDepartmentId(null);
     setZoneKind("custom");
   };
   const setRangeSafe = (a: number, b: number) => setRange(a <= b ? [a, b] : [b, a]);
@@ -313,6 +347,7 @@ export default function App() {
                     className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
                 ))}
               </div>
+              {department && <p className="dep-active" role="status"><span aria-hidden>◉</span> {t.depActive(department.name)}</p>}
               <div className="area-tools" role="group" aria-label={t.customArea}>
                 <span className="tools-label">{t.customArea}</span>
                 <button aria-pressed={drawing || (zoneKind === "custom" && !coords && !coordsOpen)}
@@ -379,6 +414,11 @@ export default function App() {
               </details>
               <ValidationPanel meta={meta} />
             </section>
+
+            {ranking && (
+              <DepartmentRanking rows={ranking} monthLabel={monthLabel} coverage={cov} selectedId={zoneKind === "department" ? departmentId : null}
+                onSelect={pickDepartment} />
+            )}
 
             <section className="newplaces">
               <h2><span className="dot-new" aria-hidden />{t.newTitle}</h2>
@@ -473,14 +513,18 @@ export default function App() {
                 <p>{t.footData(meta.months.last, data.current?.to ?? null)}</p>
                 {updatedLine}
                 {val && <p>{t.footValidation(val.country?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
+                <h3 className="about-h">{t.partnerTitle}</h3>
+                <p>{t.footBoundaries(departments?.meta.retrieved ?? null)}{" "}
+                  <a href={departments?.meta.url ?? GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
+                </p>
               </details>
               <p>{t.footHotspot}</p>
             </footer>
           </aside>
 
           <MapView grid={grid} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
-            polygon={zoneKind === "custom" ? polygon : null} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
-            onDrawn={(ring) => { setPolygon(ring); setCoords(null); setZoneKind("custom"); setDrawing(false); }}
+            outline={outline} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
+            onDrawn={(ring) => { setPolygon(ring); setCoords(null); setDepartmentId(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)}
             onUserMove={() => setMapMoved(true)} onViewReset={() => setMapMoved(false)} />
         </main>
