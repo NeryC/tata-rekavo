@@ -114,7 +114,8 @@ export function sourceOf(meta: GridMeta, current: CurrentMeta | null, m: number,
   const several = Object.keys(p).length > 1;
   const names = Object.entries(p).sort((a, b) => b[1] - a[1]).map(([k, d]) => {
     const [, sat, kind] = k.split("_");
-    return `${SATS[sat] ?? sat}${kind === "NRT" ? ` (${i.t.nrt})` : ""}${several ? ` · ${d} ${i.t.days}` : ""}`;
+    const extra = [kind === "NRT" ? i.t.nrt : "", several ? `${d} ${i.t.days}` : ""].filter(Boolean).join(", ");
+    return `${SATS[sat] ?? sat}${extra ? ` (${extra})` : ""}`;
   });
   return names.length ? names.join(" + ") : "VIIRS";
 }

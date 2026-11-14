@@ -66,6 +66,8 @@ export default function MapView(p: Props) {
       const m = new maplibregl.Map({
         container: box.current, style, bounds: [-62.8, -27.7, -54.1, -19.1],
         fitBoundsOptions: { padding: 24 }, attributionControl: { compact: true },
+        // on phones the page scrolls: one finger scrolls the page, two fingers move the map
+        cooperativeGestures: window.matchMedia("(max-width: 860px)").matches,
         locale: {
           "NavigationControl.ZoomIn": props.current.i18n.t.zoomIn,
           "NavigationControl.ZoomOut": props.current.i18n.t.zoomOut,
@@ -107,11 +109,11 @@ export default function MapView(p: Props) {
           },
         });
         m.addLayer({ id: "hotspots", type: "circle", source: "hotspots", filter: ["==", ["get", "fresh"], 0],
-          paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 1.2, 9, 3], "circle-color": "#3d0c02",
+          paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 1.8, 9, 4], "circle-color": "#3d0c02",
                    "circle-opacity": 0.75 } });
         // hotspots in places with no fire on record within ~1 km: drawn on top, larger, in a contrasting hue
         m.addLayer({ id: "hotspots-new", type: "circle", source: "hotspots", filter: ["==", ["get", "fresh"], 1],
-          paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3.2, 9, 6], "circle-color": "#2a78d6",
+          paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 4, 9, 7], "circle-color": "#2a78d6",
                    "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.2 } });
         m.addLayer({ id: "zone", type: "line", source: "zone",
           paint: { "line-color": "#0b0b0b", "line-width": 2, "line-dasharray": [2, 1.5] } });

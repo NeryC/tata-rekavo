@@ -60,6 +60,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
   const rows = [...cal.rows].reverse();
   const binLabel = (l: string) => (l === "≈ normal" ? t.normalBin : i18n.lang === "es" ? l.replace(".", ",") : l);
   const typicalTotal = cal.monthlyMedian.reduce((a, b) => a + b, 0);
+  const rangeIsAll = range[0] <= 0 && range[1] >= grid.nMonths - 1;
   const classMax = (id: string) => grid.meta.classes.find((c) => c.id === id)?.max ?? (id === "low" ? 0.5 : 1.5);
 
   return (
@@ -76,7 +77,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
             {cal.monthlyMedian.map((v, i) => (
               <span key={i} role="gridcell" className="cal-cell static" style={{ background: scale.colorOf(v) }}
                 aria-label={`${t.typicalRow} ${i18n.monthShort(i + 1)}: ${num(v)}`}
-                onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: [`${t.typicalRow} · ${i18n.monthShort(i + 1)}`, `${num(v)} ${t.hotspots}`] })} />
+                onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: [`${i18n.monthShort(i + 1)}, ${t.typicalRow}`, `${num(v)} ${t.hotspots}`] })} />
             ))}
             <span className="cal-total">{typicalTotal >= 1000 ? `${Math.round(typicalTotal / 1000)}k` : num(typicalTotal)}</span>
           </div>
@@ -114,7 +115,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
               ];
               return (
                 <button key={i} role="gridcell" aria-label={lines.join(", ")} aria-selected={c.m === selected}
-                  className={`cal-cell${c.m === selected ? " sel" : ""}${err > 0 ? " translated" : ""}${cov < 1 ? " partial" : ""}${out ? " out" : ""}`}
+                  className={`cal-cell${c.m === selected ? " sel" : ""}${err > 0 ? " translated" : ""}${cov < 1 ? " partial" : ""}${!out && !rangeIsAll ? " in" : ""}`}
                   style={{ background: color }}
                   onClick={() => onSelect(c.m)}
                   onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: lines })} />
@@ -132,6 +133,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
               {k === arr.length - 1 ? `${num(th)}+` : `${num(k === 0 ? 1 : th)}–${num(arr[k + 1])}`}</span>
           ))}
       </div>
+      {!rangeIsAll && <p className="cal-key"><i className="in-key" />{t.rangeKey}</p>}
       <p className="note">{mode === "ratio" ? t.calNote : t.calNoteCount}</p>
       {tip && (
         <div className="tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>

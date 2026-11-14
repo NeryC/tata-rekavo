@@ -57,7 +57,7 @@ export async function downloadReport(p: ReportInput, filename: string) {
     colors.forEach((c, i) => {
       if (!c) return;
       const x = pad + labelW + i * (cellW + gap);
-      g.globalAlpha = dims[i] ? 0.28 : 1;
+      g.globalAlpha = dims[i] ? 0.45 : 1;
       g.fillStyle = c; g.beginPath(); g.roundRect(x, y, cellW, cellH, 3); g.fill();
       if (hatch[i]) {
         g.save(); g.clip(); g.strokeStyle = "rgba(255,255,255,0.45)"; g.lineWidth = 1.5;

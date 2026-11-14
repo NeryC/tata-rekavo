@@ -12,9 +12,8 @@ import {
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang } from "./i18n";
 
 type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom";
-const CLASS_STYLE: Record<string, { icon: string; color: string }> = {
-  low: { icon: "↓", color: "#2a78d6" }, normal: { icon: "≈", color: "#52514e" },
-  high: { icon: "↑", color: "#c9461a" }, extreme: { icon: "▲", color: "#d03b3b" },
+const CLASS_STYLE: Record<string, { icon: string }> = {
+  low: { icon: "↓" }, normal: { icon: "≈" }, high: { icon: "↑" }, extreme: { icon: "▲" },
 };
 const REPO = "https://github.com/NeryC/tata-rekavo";
 const MAX_ROWS = 1_500_000;
@@ -120,7 +119,11 @@ export default function App() {
       <nav>
         <a href={`${REPO}#method`} target="_blank" rel="noreferrer">{t.method}</a>
         <a href={REPO} target="_blank" rel="noreferrer">{t.code}</a>
-        {data && <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle}>{t.resetAll}</button>}
+        {data && (
+          <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle} aria-label={t.resetAllTitle}>
+            <span aria-hidden>↺</span><span className="lbl">{t.resetAll.replace("↺ ", "")}</span>
+          </button>
+        )}
         <span className="lang" role="group" aria-label={t.langLabel}>
           <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")} aria-pressed={lang === "en"}>EN</button>
           <button className={lang === "es" ? "on" : ""} onClick={() => setLang("es")} aria-pressed={lang === "es"}>ES</button>
@@ -201,13 +204,21 @@ export default function App() {
     }
   };
 
+  const CLASS_IDS = ["low", "normal", "high", "extreme"] as const;
+  const scalePos = (() => { // marker position across four equal segments, 0-100
+    const [c0, c1, c2] = meta.classes.map((c) => c.max ?? 0);
+    const r = Number.isFinite(v.ratio) ? v.ratio : c2 * 2;
+    const [seg, f] = r < c0 ? [0, r / c0] : r < c1 ? [1, (r - c0) / (c1 - c0)] : r < c2 ? [2, (r - c1) / (c2 - c1)] : [3, Math.min(1, (r - c2) / c2)];
+    return Math.min(99, Math.max(1, (seg + f) * 25));
+  })();
+
   return (
     <I18nContext.Provider value={i18n}>
       <div className="app">
         {header}
         <main>
           <aside className="panel">
-            <section>
+            <section className="sec-area">
               <h2>{t.step1}</h2>
               <div className="seg area" role="group" aria-label={t.step1}>
                 {(["paraguay", "chaco", "oriental"] as const).map((k) => (
@@ -227,16 +238,16 @@ export default function App() {
                 </div>
                 <p className={coordsError ? "dl-error" : "note"}>{coordsError ? t.coordsInvalid : t.coordsHelp}</p>
               </>)}
-              {(zoneKind !== "paraguay" || drawing || coordsOpen) && (
-                <button className="link" onClick={() => pickZone("paraguay")}>{t.resetArea}</button>
-              )}
-              <p className="meta">{t.cellsArea(num(zoneCells.length), num(areaKm2(meta, zoneCells)))}
-                {small && zoneCells.length > 0 && <span className="warn">{t.smallArea}</span>}
-                {zoneCells.length === 0 && <span className="warn">{t.noCells}</span>}
+              <p className="meta">
+                {zoneCells.length > 0 ? t.cellsArea(num(zoneCells.length), num(areaKm2(meta, zoneCells))) : <span className="warn">{t.noCells}</span>}
+                {(zoneKind !== "paraguay" || drawing || coordsOpen) && (
+                  <button className="link" onClick={() => pickZone("paraguay")}>{t.resetArea}</button>
+                )}
               </p>
+              {small && zoneCells.length > 0 && <p className="warn">{t.smallArea}</p>}
             </section>
 
-            <section>
+            <section className="sec-month">
               <h2>{t.step2}</h2>
               <div className="month-row">
                 <button aria-label={t.prev} onClick={() => setMonth(Math.max(0, month - 1))} disabled={month === 0}>‹</button>
@@ -245,21 +256,34 @@ export default function App() {
                 </select>
                 <button aria-label={t.next} onClick={() => setMonth(Math.min(last, month + 1))} disabled={month === last}>›</button>
               </div>
-              {month !== last && <button className="link" onClick={() => setMonth(last)}>{t.resetMonth}</button>}
+              {month !== last && <p className="meta"><button className="link" onClick={() => setMonth(last)}>{t.resetMonth}</button></p>}
             </section>
 
-            <section className="verdict" style={{ borderColor: cls.color }} aria-live="polite">
-              <div className="v-when">{t.verdictWhen(monthLabel, zoneLabel, v.partial ? Math.round(cov * 100) : null)}</div>
-              <div className="v-main">
-                <span className="v-badge" style={{ background: cls.color }}>{cls.icon} {t.classes[v.class.id]}</span>
-                <span className="v-ratio">{Number.isFinite(v.ratio) ? `×${i18n.ratio(v.ratio)}` : "—"}<small>{t.ofUsual}</small></span>
+            <section className={`verdict v-${v.class.id}`} aria-live="polite">
+              <p className="v-when">{t.verdictWhen(i18n.monthLongLabel(selYear, selMonth), zoneLabel)}</p>
+              <p className="v-class"><span aria-hidden>{cls.icon}</span> {t.classes[v.class.id]}</p>
+              <p className="v-main">
+                <span className="v-ratio">{Number.isFinite(v.ratio) ? `×${i18n.ratio(v.ratio)}` : "—"}</span>
+                <span className="v-of">{t.ofUsual}</span>
+              </p>
+              <div className="v-scale" role="img" aria-label={t.scaleAria(Number.isFinite(v.ratio) ? i18n.ratio(v.ratio) : "—")}>
+                <div className="v-track">
+                  {CLASS_IDS.map((id) => <span key={id} className={id === v.class.id ? "on" : ""} />)}
+                  <i style={{ left: `${scalePos}%` }} />
+                </div>
+                <div className="v-labels">{CLASS_IDS.map((id) => <span key={id} className={id === v.class.id ? "on" : ""}>{t.scale[id]}</span>)}</div>
               </div>
               <p className="v-text">
-                <b>{num(v.value)}</b> {t.hotspots}{v.relativeError > 0 && <> (±{Math.round(v.relativeError * 100)}%)</>} {t.vsUsual}{" "}
-                <b>{num(v.median)}</b> {t.forPart(monthLong, v.partial)} — {t.medianOf(v.yearsCompared)}
+                <b>{num(v.value)}</b> {t.hotspots}{v.relativeError > 0 && <> (±{Math.round(v.relativeError * 100)}%)</>}. {t.usualIs(monthLong, v.partial)}{" "}
+                <b>{num(v.median)}</b> {t.medianOf(v.yearsCompared)}
                 {v.rank !== null && v.yearsCompared >= 5 && <> {t.rank(v.rank, monthLong, v.yearsCompared + 1)}</>}
               </p>
+              {v.partial && <p className="v-tag">{t.partialTag(Math.round(cov * 100))}</p>}
               <p className="v-src">{t.source} {sourceOf(meta, data.current, month, i18n)}</p>
+              <details>
+                <summary>{t.whatIsHotspot}</summary>
+                <p>{t.hotspotDef}</p>
+              </details>
             </section>
 
             <section className="newplaces">
@@ -272,37 +296,11 @@ export default function App() {
                   <input type="checkbox" checked={newOnly} onChange={(e) => setNewOnly(e.target.checked)} />
                   {t.newOnly}
                 </label>
-                <p className="note">{t.newNote}</p>
+                <details>
+                  <summary>{t.newWhat}</summary>
+                  <p>{t.newNote}</p>
+                </details>
               </>) : <p className="note">{t.newUnavailable}</p>}
-            </section>
-
-            <section>
-              <h2>{t.step3}</h2>
-              <div className="range-row">
-                <span>{t.rangeFrom}</span>
-                <select value={range[0]} onChange={(e) => setRangeSafe(+e.target.value, range[1])} aria-label={t.rangeFrom}>
-                  {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}</option>)}
-                </select>
-                <span>{t.rangeTo}</span>
-                <select value={range[1]} onChange={(e) => setRangeSafe(range[0], +e.target.value)} aria-label={t.rangeTo}>
-                  {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}</option>)}
-                </select>
-              </div>
-              <div className="chips">
-                {Object.entries(presets).map(([k, r]) => (
-                  <button key={k} className={range[0] === r[0] && range[1] === r[1] ? "on" : ""} onClick={() => setRange(r)}>{t.presets[k]}</button>
-                ))}
-                {(range[0] !== presets.year[0] || range[1] !== presets.year[1]) && (
-                  <button className="reset" onClick={() => setRange(presets.year)}>{t.resetRange}</button>
-                )}
-              </div>
-            </section>
-
-            <section className="analytics" aria-live="polite">
-              <h3>{t.rangeTitle(ml(range[0]), ml(range[1]))} · {zoneLabel}</h3>
-              <div className="big">{t.rangeTotal(num(analytics.total), analytics.err > 0 ? ` ±${num(analytics.err)}` : "")}</div>
-              <ul>{analyticsLines.map((l) => <li key={l}>{l}</li>)}</ul>
-              {analytics.partial && <span className="tag">{t.rangePartial}</span>}
             </section>
 
             <section>
@@ -328,8 +326,37 @@ export default function App() {
               <p className="note">{naive ? t.noteNaive : t.noteHarmonized}</p>
             </section>
 
-            <section>
-              <h2>{t.download} · {rangeLabel}</h2>
+            <section className="period">
+              <h2>{t.step3}</h2>
+              <div className="range-row">
+                <label>{t.rangeFrom}
+                  <select value={range[0]} onChange={(e) => setRangeSafe(+e.target.value, range[1])}>
+                    {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}</option>)}
+                  </select>
+                </label>
+                <label>{t.rangeTo}
+                  <select value={range[1]} onChange={(e) => setRangeSafe(range[0], +e.target.value)}>
+                    {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="chips">
+                {Object.entries(presets).map(([k, r]) => (
+                  <button key={k} className={range[0] === r[0] && range[1] === r[1] ? "on" : ""} onClick={() => setRange(r)}>{t.presets[k]}</button>
+                ))}
+                {(range[0] !== presets.year[0] || range[1] !== presets.year[1]) && (
+                  <button className="reset" onClick={() => setRange(presets.year)}>{t.resetRange}</button>
+                )}
+              </div>
+
+              <div className="analytics" aria-live="polite">
+                <h3>{t.rangeTitle(ml(range[0]), ml(range[1]), zoneLabel)}</h3>
+                <p className="big">{t.rangeTotal(num(analytics.total), analytics.err > 0 ? ` ±${num(analytics.err)}` : "")}</p>
+                <ul>{analyticsLines.map((l) => <li key={l}>{l}</li>)}</ul>
+                {analytics.partial && <p className="tag">{t.rangePartial}</p>}
+              </div>
+
+              <h3>{t.download}</h3>
               <div className="downloads">
                 <button onClick={() => {
                   const lines = H.seriesToCSV(grid, series).trimEnd().split("\n");
@@ -347,8 +374,11 @@ export default function App() {
             </section>
 
             <footer className="about">
-              <p>{t.footData(meta.months.last, data.current?.to ?? null)}</p>
-              {val && <p>{t.footValidation(val.country?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
+              <details>
+                <summary>{t.aboutData}</summary>
+                <p>{t.footData(meta.months.last, data.current?.to ?? null)}</p>
+                {val && <p>{t.footValidation(val.country?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
+              </details>
               <p>{t.footHotspot}</p>
             </footer>
           </aside>

@@ -36,7 +36,7 @@ export default function YearChart({ grid, series, naive, selectedYear, lastParti
   const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
   const years = useMemo(() => yearTotals(grid, series), [grid, series]);
 
-  const W = 420, Hh = 170, L = 38, B = 20, T = 8;
+  const W = 440, Hh = 190, L = 44, B = 24, T = 10;
   const max = Math.max(...years.map((y) => Math.max(y.h + y.err, y.n))) * 1.05 || 1;
   const bw = (W - L) / years.length;
   const y = (v: number) => T + (Hh - T - B) * (1 - v / max);
@@ -63,7 +63,7 @@ export default function YearChart({ grid, series, naive, selectedYear, lastParti
         {ticks.map((tk) => (
           <g key={tk}>
             <line x1={L} x2={W} y1={y(tk)} y2={y(tk)} className="gridline" />
-            <text x={L - 5} y={y(tk) + 3} className="axis" textAnchor="end">{tk >= 1000 ? `${tk / 1000}k` : tk}</text>
+            <text x={L - 6} y={y(tk) + 4} className="axis" textAnchor="end">{tk >= 1000 ? `${tk / 1000}k` : tk}</text>
           </g>
         ))}
         {years.map((d, i) => {
@@ -86,7 +86,7 @@ export default function YearChart({ grid, series, naive, selectedYear, lastParti
                 <line x1={x + bw / 2 - 1} x2={x + bw / 2 - 1} y1={y(d.h + d.err)} y2={y(Math.max(0, d.h - d.err))} className="errbar" />
               )}
               {(d.year % 4 === 2 || d.year === last) && (
-                <text x={x + bw / 2 - 1} y={Hh - 5} className="axis" textAnchor="middle">{`'${String(d.year).slice(2)}`}</text>
+                <text x={x + bw / 2 - 1} y={Hh - 7} className="axis" textAnchor="middle">{`'${String(d.year).slice(2)}`}</text>
               )}
             </g>
           );
@@ -97,7 +97,7 @@ export default function YearChart({ grid, series, naive, selectedYear, lastParti
           if (i < 0) return null;
           const x = L + i * bw;
           return (<g><line x1={x} x2={x} y1={T} y2={y(0)} className="marker" />
-            <text x={x + 3} y={T + 9} className="axis">{t.viirsStarts}</text></g>);
+            <text x={x + 4} y={T + 10} className="axis">{t.viirsStarts}</text></g>);
         })()}
       </svg>
       {tip && (
