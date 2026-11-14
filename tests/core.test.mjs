@@ -158,3 +158,13 @@ test("departmentRanking on real data: 17 departments with finite medians", () =>
   assert.ok(r.every((x) => Number.isFinite(x.median) && Number.isFinite(x.value)));
   assert.equal(new Set(r.map((x) => x.id)).size, 17);
 });
+
+test("departmentRanking ranks months with no history as lowSignal, not solid", () => {
+  // month 0 has no earlier same-calendar-month data: median is NaN
+  const g = synthGrid({ 1: { history: [10, 10, 10, 10], value: 40 }, 2: { history: [50, 10, 10, 10], value: 5 } });
+  const r = departmentRanking(g, [dep("a", 1), dep("b", 2)], 0);
+  assert.ok(r.every((x) => Number.isNaN(x.median) && x.lowSignal));
+  assert.deepEqual(r.map((x) => x.id), ["b", "a"]); // by value desc: 50 then 10
+  const rr = departmentRanking(g, [dep("a", 1), dep("b", 2)], 3);
+  assert.ok(rr.every((x) => x.lowSignal));
+});
