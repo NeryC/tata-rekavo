@@ -280,7 +280,7 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .trust img { display: block; max-width: 100%; height: auto; margin-top: 10px; border-radius: 4px; }
 .trust-fig { display: block; margin-top: 10px; color: var(--blue); font-size: 14px; text-underline-offset: 3px; }
 .trust-fig img { margin-top: 0; }
-.trust-fig span { display: inline-block; margin-top: 6px; text-decoration: underline; }
+.trust-fig > span { display: inline-block; margin-top: 6px; text-decoration: underline; }
 .verdict .trust-fig:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 
 /* ---------- department ranking: where is it abnormal ---------- */
@@ -313,6 +313,14 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .rk-foot { font-size: 13px; }
 @media (max-width: 860px) {
   .panel > section.ranking { order: 3; margin: 0 16px 16px; padding: 12px 0; border-top: 1px solid var(--rule); border-bottom: 0; }
+}
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* small phones: copy-link + reset + EN/ES leave the title too little room, so drop the logo and tighten the nav */
+@media (max-width: 420px) {
+  .logo { display: none; }
+  .top nav { gap: 6px; }
+  .reset-all { padding: 0 8px; }
+  .top h1 { font-size: 17px; }
 }
 @media (max-width: 420px) {
   .rk-row { grid-template-columns: 1fr auto; grid-template-areas: "name ratio" "chip chip" "sub sub"; }

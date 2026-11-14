@@ -45,7 +45,7 @@ export default function ValidationPanel({ meta }: { meta: Meta }) {
         {imgOk && (
           <a className="trust-fig" href={url("validation.png")} target="_blank" rel="noopener">
             <img src={url("validation.png")} loading="lazy" alt={t.validationAlt} onError={() => setImgOk(false)} />
-            <span>{t.trustOpen} ↗</span>
+            <span>{t.trustOpen} <span aria-hidden="true">↗</span><span className="sr-only"> {t.opensNewTab}</span></span>
           </a>
         )}
       </div>

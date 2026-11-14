@@ -22,6 +22,7 @@ const CLASS_STYLE: Record<string, { icon: string }> = {
 };
 const REPO = "https://github.com/NeryC/tata-rekavo";
 const GEOBOUNDARIES = "https://www.geoboundaries.org/";
+const GEOBOUNDARIES_RETRIEVED = "2026-11-14"; // shown when departments.json did not load
 const MAX_ROWS = 1_500_000;
 
 export default function App() {
@@ -219,7 +220,7 @@ export default function App() {
       <nav>
         <a href={`${REPO}#method`} target="_blank" rel="noreferrer">{t.method}</a>
         <a href={REPO} target="_blank" rel="noreferrer">{t.code}</a>
-        <button className="reset-all copy-link" onClick={() => void copyLink()} title={t.copyLinkTitle} aria-label={t.copyLinkTitle}>
+        <button className="reset-all copy-link" onClick={() => void copyLink()} title={t.copyLinkTitle} aria-label={t.copyLink}>
           <span aria-hidden>🔗</span><span className="lbl">{t.copyLink}</span>
         </button>
         {changed && (
@@ -235,8 +236,7 @@ export default function App() {
       {toast && <div className="toast" role="status">{toast}</div>}
       {manualUrl && (
         <label className="manual-link">{t.linkCopyManual}
-          <input readOnly value={manualUrl} onFocus={(e) => e.currentTarget.select()}
-            ref={(el) => { if (el) { el.focus(); el.select(); } }} onBlur={() => setManualUrl(null)} />
+          <input readOnly autoFocus value={manualUrl} onFocus={(e) => e.currentTarget.select()} onBlur={() => setManualUrl(null)} />
         </label>
       )}
     </header>
@@ -288,10 +288,17 @@ export default function App() {
     if (!id) { pickZone("paraguay"); return; }
     setDrawing(false); setCoordsOpen(false); setPolygon(null); setCoords(null);
     setDepartmentId(id); setZoneKind("department");
-    // stacked phone layout: the answer sits above the list, so bring it into view (on desktop it is already beside the map)
-    if (window.matchMedia("(max-width: 860px)").matches) {
-      requestAnimationFrame(() => document.querySelector(".verdict")?.scrollIntoView({ block: "start", behavior: "smooth" }));
-    }
+    // stacked phone layout: the answer sits above the list, so bring it to the top of the screen.
+    // desktop: it sits beside the map, so only scroll when its top is outside the viewport, and as little as possible.
+    const phone = window.matchMedia("(max-width: 860px)").matches;
+    const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    requestAnimationFrame(() => {
+      const el = document.querySelector(".verdict");
+      if (!el) return;
+      if (phone) { el.scrollIntoView({ block: "start", behavior }); return; }
+      const top = el.getBoundingClientRect().top;
+      if (top < 0 || top > window.innerHeight) el.scrollIntoView({ block: "nearest", behavior });
+    });
   };
   const applyCoords = () => {
     const parse = (s: string) => parseFloat(s.replace(",", ".").replace("−", "-"));
@@ -387,7 +394,8 @@ export default function App() {
               {month !== last && <p className="meta"><button className="link" onClick={() => setMonth(last)}>{t.resetMonth}</button></p>}
             </section>
 
-            <section className={`verdict v-${v.class.id}`} aria-live="polite">
+            <section className={`verdict v-${v.class.id}`}>
+              <div aria-live="polite">
               <p className="v-when">{t.verdictWhen(i18n.monthLongLabel(selYear, selMonth), zoneLabel)}</p>
               <p className="v-class"><span aria-hidden>{cls.icon}</span> {t.classes[v.class.id]}</p>
               <p className="v-main">
@@ -412,6 +420,7 @@ export default function App() {
                 <summary>{t.whatIsHotspot}</summary>
                 <p>{t.hotspotDef}</p>
               </details>
+              </div>
               <ValidationPanel meta={meta} />
             </section>
 
@@ -514,8 +523,8 @@ export default function App() {
                 {updatedLine}
                 {val && <p>{t.footValidation(val.country?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
                 <h3 className="about-h">{t.partnerTitle}</h3>
-                <p>{t.footBoundaries(departments?.meta.retrieved ?? null)}{" "}
-                  <a href={departments?.meta.url ?? GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
+                <p>{t.footBoundaries(departments?.meta.retrieved ?? GEOBOUNDARIES_RETRIEVED)}{" "}
+                  <a href={GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
                 </p>
               </details>
               <p>{t.footHotspot}</p>
