@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from typing import Callable, Optional, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -103,6 +104,44 @@ def cell_of(lat, lon, deg, n):
     return r, c, ok
 
 
+# ----------------------------------------------------------------------------- retries / atomic writes
+T = TypeVar("T")
+
+
+def _retryable(e):
+    """4xx answers (bad key, bad request, not found) will not change on a retry; 429 and 5xx/network errors might."""
+    return not (isinstance(e, urllib.error.HTTPError) and 400 <= e.code < 500 and e.code != 429)
+
+
+def with_retries(fn: Callable[[], T], attempts: int, delay: Callable[[int], float],
+                 sleep: Optional[Callable[[float], None]] = None,
+                 on_retry: Optional[Callable[[Exception], None]] = None) -> T:
+    """Call fn() up to `attempts` times; between failed attempts wait delay(attempt) seconds (attempt is 0-based).
+    4xx HTTP errors other than 429 are raised immediately; after the last attempt the last error is raised."""
+    sleep = sleep or time.sleep
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except Exception as e:
+            if not _retryable(e) or attempt == attempts - 1:
+                raise
+            if on_retry:
+                on_retry(e)
+            sleep(delay(attempt))
+    raise ValueError("attempts must be >= 1")
+
+
+def redact(text, key):
+    """Never let the MAP_KEY reach logs or error messages."""
+    return str(text).replace(key, "***") if key else str(text)
+
+
+def atomic_replace(tmp_paths):
+    """Move every <name>.tmp onto <name>; called only once all temp files were written completely."""
+    for tmp in tmp_paths:
+        os.replace(tmp, tmp[: -len(".tmp")])
+
+
 # ----------------------------------------------------------------------------- download
 def http_get(url, timeout=300):
     req = urllib.request.Request(url, headers={"User-Agent": "tata-rekavo-spaceapps/1.0"})
@@ -118,23 +157,22 @@ def cmd_download(args):
         if os.path.exists(path) and os.path.getsize(path) > 0:
             continue
         url = ARCHIVE_URL.format(src=src, year=year, country=COUNTRY)
-        for attempt in range(1, args.retries + 1):
-            try:
-                status, body = http_get(url)
-                if not body.startswith(b"latitude"):
-                    raise ValueError("unexpected content")
-                with open(path, "wb") as f:
-                    f.write(body)
-                log(f"ok   {src} {year} ({len(body)/1e6:.1f} MB)")
-                break
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    log(f"404  {src} {year} (not published)")
-                    break
-                log(f"retry {src} {year}: HTTP {e.code}")
-            except Exception as e:  # connection resets are common: back off and retry
-                log(f"retry {src} {year}: {e}")
-            time.sleep(2 * attempt)
+        def fetch():
+            _, body = http_get(url)
+            if not body.startswith(b"latitude"):
+                raise ValueError("unexpected content")
+            return body
+
+        try:  # connection resets are common: back off and retry (4xx except 429 is final)
+            body = with_retries(fetch, attempts=args.retries, delay=lambda a: 2 * (a + 1),
+                                on_retry=lambda e: log(f"retry {src} {year}: {e}"))
+            with open(path, "wb") as f:
+                f.write(body)
+            log(f"ok   {src} {year} ({len(body)/1e6:.1f} MB)")
+        except urllib.error.HTTPError as e:
+            log(f"404  {src} {year} (not published)" if e.code == 404 else f"gave up {src} {year}: HTTP {e.code}")
+        except Exception as e:
+            log(f"gave up {src} {year}: {e}")
         time.sleep(1)
 
 
@@ -490,22 +528,19 @@ def cmd_validate(args):
 def api_csv(url):
     status, body = http_get(url, timeout=120)
     txt = body.decode("utf-8", "replace")
-    if not txt.startswith("latitude"):
-        if txt.strip() == "" or "Invalid" in txt or "error" in txt.lower()[:200]:
-            raise RuntimeError(f"FIRMS API error: {txt[:200]}")
-    return pd.read_csv(io.StringIO(txt), dtype={"acq_time": str, "confidence": str, "version": str, "satellite": str}) if txt.startswith("latitude") else pd.DataFrame()
+    if not txt.startswith("latitude"):  # a valid answer always starts with the CSV header, even with zero rows
+        raise RuntimeError(f"FIRMS API error (not CSV): {txt[:200]!r}")
+    return pd.read_csv(io.StringIO(txt), dtype={"acq_time": str, "confidence": str, "version": str, "satellite": str})
 
 
 def availability(key):
-    for attempt in range(6):
-        try:
-            _, body = http_get(f"{API_BASE}/data_availability/csv/{key}/ALL", timeout=60)
-            break
-        except Exception as e:
-            log(f"retry data_availability: {e}")
-            time.sleep(3 * (attempt + 1))
-    else:
-        sys.exit("FIRMS data_availability endpoint unreachable")
+    try:
+        _, body = with_retries(lambda: http_get(f"{API_BASE}/data_availability/csv/{key}/ALL", timeout=60),
+                               attempts=6, delay=lambda a: 3 * (a + 1),
+                               on_retry=lambda e: log(f"retry data_availability: {redact(e, key)}"))
+    except Exception as e:
+        log(f"FIRMS data_availability endpoint unreachable: {redact(e, key)}")
+        sys.exit(2)
     d = pd.read_csv(io.StringIO(body.decode()))
     log("availability: " + ", ".join(f"{k} {v[0].date()}..{v[1].date()}" for k, v in
                                      {r.data_id: (pd.Timestamp(r.min_date), pd.Timestamp(r.max_date)) for r in d.itertuples()}.items()
@@ -571,17 +606,16 @@ def cmd_fetch_current(args):
             continue
         else:
             url = f"{API_BASE}/area/csv/{key}/{prod}/{','.join(map(str, BBOX))}/{span}/{day.date()}"
-            for attempt in range(10):
-                try:
-                    df = api_csv(url)
-                    break
-                except Exception as e:
-                    log(f"retry {day.date()} {prod}: {e}")
-                    time.sleep(min(60, 4 * (attempt + 1)))
-            else:
-                sys.exit(f"failed {url.replace(key, '***')} - run again, finished requests are cached in {cache}")
+            try:
+                df = with_retries(lambda: api_csv(url), attempts=10, delay=lambda a: min(60, 4 * (a + 1)),
+                                  on_retry=lambda e: log(f"retry {day.date()} {prod}: {redact(e, key)}"))
+            except Exception as e:
+                log(f"failed {redact(url, key)}: {redact(e, key)} - run again, finished requests are cached in {cache}")
+                sys.exit(2)
             # always cache (recent NRT requests are re-fetched on the next online run anyway)
-            (df if len(df) else pd.DataFrame(columns=["latitude", "longitude", "acq_date"])).to_csv(cpath, index=False)
+            tmp = cpath + ".tmp"
+            (df if len(df) else pd.DataFrame(columns=["latitude", "longitude", "acq_date"])).to_csv(tmp, index=False)
+            atomic_replace([tmp])
             log(f"{day.date()} +{span}d {prod}: {len(df)}")
             time.sleep(0.5)
         for i in range(span):  # day -> product (the preferred product wins if two cover the same day)
@@ -622,7 +656,8 @@ def cmd_fetch_current(args):
     missing_days = [str(d.date()) for d in alld if d not in got]
     if missing_days:
         log(f"{len(missing_days)} days without data yet (first {missing_days[0]}, last {missing_days[-1]})")
-    with open(os.path.join(args.out, "current.json"), "w") as fh:
+    jpath, hpath = os.path.join(args.out, "current.json"), os.path.join(args.out, "current_hotspots.csv")
+    with open(jpath + ".tmp", "w") as fh:
         json.dump({"meta": {"source": "NASA FIRMS Area API; per day the best available VIIRS product "
                                       "(S-NPP preferred; NOAA-20 / NOAA-21 when S-NPP has no data; standard processing before near-real-time)",
                             "from": str(start.date()), "to": str(end.date()),
@@ -632,7 +667,8 @@ def cmd_fetch_current(args):
                             "month_coverage_note": "share of the month's days with data (1 = complete month); comparisons are scaled by it",
                             "month_products": month_src, "days_without_data": missing_days},
                    "cells": cells}, fh, separators=(",", ":"))
-    df.drop(columns=["date", "m", "cell"]).to_csv(os.path.join(args.out, "current_hotspots.csv"), index=False)
+    df.drop(columns=["date", "m", "cell"]).to_csv(hpath + ".tmp", index=False)
+    atomic_replace([jpath + ".tmp", hpath + ".tmp"])  # both fully written first, so a crash never leaves a half file
     log(f"current.json: {len(df):,} hotspots inside Paraguay, {len(cells)} cells, "
         f"coverage {', '.join(f'{index_to_ym(m)[1]:02d}:{v:.0%}' for m, v in month_cov.items())}")
 
