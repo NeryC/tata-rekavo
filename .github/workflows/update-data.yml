@@ -1,0 +1,60 @@
+name: Update data
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore API cache
+        uses: actions/cache@v4
+        with:
+          path: data/api_cache
+          key: api-cache-${{ github.run_id }}
+          restore-keys: api-cache-
+
+      - name: Fetch current FIRMS data
+        env:
+          FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+        run: python firms_pipeline.py fetch-current --out data/app
+
+      - name: Validate data contract
+        run: node test_contract.mjs data/app
+
+      - name: Commit and push changes
+        run: |
+          if [ -z "$(git status --porcelain data/app)" ]; then
+            echo "no changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/app
+          git commit -m "data: daily FIRMS update $(date -u +%F)"
+          git pull --rebase origin main
+          git push
