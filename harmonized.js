@@ -108,6 +108,25 @@ export function zoneSeries(grid, cellIds) {
   return { harmonized, modis, viirs, naive };
 }
 
+/** Validation panel summary: leave-one-year-out MdAPE and anomaly-class agreement for paraguay/chaco/oriental. */
+export function validationSummary(meta) {
+  const loyo = meta?.validation?.leave_one_year_out ?? {};
+  const agree = meta?.validation?.anomaly_class_agreement ?? {};
+  const rows = [];
+  for (const [area, key] of [["paraguay", "country"], ["chaco", "chaco"], ["oriental", "oriental"]]) {
+    const e = loyo[key];
+    if (!e || typeof e.mdape_pct !== "number") continue;
+    const pct = agree[key]?.same_class_pct;
+    rows.push({
+      area,
+      mdapePct: Math.round(e.mdape_pct * 10) / 10,
+      classAgreementPct: typeof pct === "number" ? Math.round(pct) : null,
+    });
+  }
+  const sp = agree.country?.spearman;
+  return { rows, spearman: typeof sp === "number" ? sp : null, nMonths: loyo.country?.n ?? 0 };
+}
+
 /** Relative error band (median absolute relative error) for a zone-month value. */
 export function relativeError(meta, m, value) {
   if (m >= meta.months.viirs_start_index) return 0; // observed VIIRS: no translation error

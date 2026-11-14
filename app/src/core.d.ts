@@ -7,8 +7,8 @@ export interface GridMeta {
   classes: ClassDef[];
   error_model: { c: number; p: number; sys_by_year: Record<string, number> };
   validation: {
-    leave_one_year_out: Record<string, { mdape_pct: number }>;
-    anomaly_class_agreement: Record<string, { same_class_pct: number }>;
+    leave_one_year_out: Record<string, { mdape_pct: number; n?: number }>;
+    anomaly_class_agreement: Record<string, { same_class_pct: number; spearman?: number }>;
   };
   [k: string]: unknown;
 }
@@ -39,5 +39,8 @@ export function relativeError(meta: GridMeta, m: number, value: number): number;
 export function classify(meta: GridMeta, ratio: number): ClassDef;
 export function monthCoverage(meta: GridMeta, m: number, current?: CurrentMeta | string | null): number;
 export function verdict(grid: Grid, series: Float64Array, m: number, coverage?: number): Verdict;
+export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null }
+export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
+export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;
 export function calendar(grid: Grid, series: Float64Array): Calendar;
 export function seriesToCSV(grid: Grid, s: Series): string;
