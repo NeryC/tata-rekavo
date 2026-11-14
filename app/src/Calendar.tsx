@@ -60,6 +60,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
   const rows = [...cal.rows].reverse();
   const binLabel = (l: string) => (l === "≈ normal" ? t.normalBin : i18n.lang === "es" ? l.replace(".", ",") : l);
   const typicalTotal = cal.monthlyMedian.reduce((a, b) => a + b, 0);
+  const classMax = (id: string) => grid.meta.classes.find((c) => c.id === id)?.max ?? (id === "low" ? 0.5 : 1.5);
 
   return (
     <div className="calendar" onMouseLeave={() => setTip(null)}>
@@ -92,12 +93,15 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
               const color = mode === "ratio" ? binOf(ratio).color : scale.colorOf(c.value);
               const err = c.relativeError;
               const out = c.m < range[0] || c.m > range[1];
-              // "Modo Catador": turns the model uncertainty into a field-validation hint
+              // "Modo Catador": turns the model uncertainty into a field-validation hint.
+              // An anomaly is "robust" when it keeps its class across the whole error band.
               const cat = t.catador;
-              const catadorInsight = ratio > 2 && err > 0.15 ? cat.warnHigh
-                : ratio > 1.5 && err < 0.1 ? cat.realHigh
-                : cov < 1 ? cat.partial(Math.round(cov * 100))
-                : ratio < 0.5 ? cat.low
+              const hiMin = classMax("normal"), loMax = classMax("low");
+              const lo = ratio * (1 - err), hi = ratio * (1 + err);
+              const r2 = (x: number) => i18n.ratio(x);
+              const catadorInsight = cov < 1 ? cat.partial(Math.round(cov * 100))
+                : ratio >= hiMin ? (err === 0 ? cat.highObserved : lo >= hiMin ? cat.highRobust(r2(lo)) : cat.highUncertain(r2(lo), r2(hi)))
+                : ratio < loMax ? (err === 0 || hi < loMax ? cat.lowRobust : cat.lowUncertain(r2(lo), r2(hi)))
                 : cat.normal;
               const lines = [
                 `${i18n.monthLabel(row.year, i + 1)}${cov < 1 ? t.calFirstPct(Math.round(cov * 100)) : ""}`,
