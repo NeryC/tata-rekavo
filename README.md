@@ -71,6 +71,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 | `series_regions.csv` | Monthly harmonized / raw MODIS / raw VIIRS for Paraguay, Chaco, Oriental |
 | `grid_monthly.csv` | Same as `grid.json` in long CSV form |
 | `hotspots/*.csv.gz` | Individual hotspots Jul 2002 – Dec 2025, one gzip CSV per 1° block (~46 MB in total), with `harmonized_weight`, plus `index.json` |
+| `departments.json` | The 17 departments (Asunción merged into Central): simplified boundary, bounding box and the grid cells whose centre falls inside, so every cell belongs to exactly one department. Boundaries from geoBoundaries (see below) |
 | `gaps.json` | Detected sensor outages and the days filled |
 | `mask.json` | ~5 km country mask (cells with any hotspot in the Paraguay archives), used to clip API data |
 | `metrics.json` | Full validation results |
@@ -90,8 +91,9 @@ The approach follows the same principle used in the literature to bridge the MOD
 
 **Is this fire normal?** Pick an area, a month and a date range:
 
-- **Area:** Paraguay, the Chaco, the Oriental region, any polygon drawn on the map, or a point (latitude / longitude) with a radius.
+- **Area:** Paraguay, the Chaco, the Oriental region, any of the 17 departments (from the ranking below), any polygon drawn on the map, or a point (latitude / longitude) with a radius.
 - **Verdict:** the selected month against the median of the same month in previous years, with its error band. A month still in progress is compared with the same share of a typical month.
+- **Where is fire abnormal?** Every department ranked for the selected month by its ratio to its own usual level, with the error band, the verdict class and the hotspot count. Click one to make it the area: the map frames it and the verdict, calendar and charts follow. A month in progress uses the same partial-month scaling as the verdict. Departments whose usual count for that month is under 3 hotspots (or with no history) are not given a ratio; they are listed last as "low signal". On phones the list is folded. A department link keeps the selection (`z=department&dep=<id>`). If `departments.json` cannot be loaded the panel is hidden and the rest of the app is unaffected.
 - **Date range analytics:** total hotspots (± error), ratio to the usual for those months, peak month, months above or below normal, and hotspots in new places. Presets: this year, last 12 months, fire season (Jul–Oct), all.
 - **Burning calendar:** years × months, in two modes.
   - *vs normal* (diverging, ratio to the usual level).
@@ -145,6 +147,11 @@ Never commit the MAP_KEY. Pass it through the environment only.
 - NASA FIRMS — Fire Information for Resource Management System: https://www.earthdata.nasa.gov/data/tools/firms
 - FIRMS country archives and Area API: https://firms.modaps.eosdis.nasa.gov/
 - MODIS Collection 6.1 Active Fire (Terra MOD14, Aqua MYD14) and VIIRS 375 m Active Fire (S-NPP VNP14IMG, NOAA-20 VJ114IMG) as distributed by FIRMS.
+
+## Space Agency Partner & Other Data
+
+- **geoBoundaries** gbOpen, Paraguay ADM1 (departments): https://www.geoboundaries.org/ (API: https://www.geoboundaries.org/api/current/gbOpen/PRY/ADM1/). Licence: CC BY 4.0. Retrieved 2026-11-14. Original source: DGEEC Paraguay (Dirección General de Estadística, Encuestas y Censos). Used for the department ranking and area selection; boundaries are simplified and Asunción is merged into Central.
+  Citation: Runfola, D. et al. (2020). geoBoundaries: A global database of political administrative boundaries. *PLoS ONE* 15(4): e0231866. https://doi.org/10.1371/journal.pone.0231866
 
 ## Use of AI
 
