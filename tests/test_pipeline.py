@@ -177,3 +177,81 @@ def test_fetch_current_offline_uses_cache_without_network(tmp_path, monkeypatch)
     cmd_fetch_current(args)
     assert json.loads((out / "current.json").read_text())["cells"]
     assert not list(out.glob("*.tmp"))
+
+
+# ----------------------------------------------------------------------------- departments (build-regions)
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _square(w, s, e, n):
+    return [[w, s], [e, s], [e, n], [w, n], [w, s]]
+
+
+def _synthetic_grid():
+    # 20x20 grid of 0.1 degree cells starting at (0, 0)
+    return dict(deg=0.1, lat0=0.0, lon0=0.0, rows=20, cols=20, cell_ids=set(range(400)))
+
+
+def test_assign_cells_square_covers_100_cells():
+    poly = {"id": "sq", "geometry": {"type": "Polygon", "coordinates": [_square(0.5, 0.5, 1.5, 1.5)]}}
+    out = firms_pipeline.assign_cells([poly], **_synthetic_grid())
+    assert len(out["sq"]) == 100
+    assert out["sq"] == sorted(out["sq"])
+    # cell (row 5, col 5) is the south-west corner cell of the square
+    assert 5 * 20 + 5 in out["sq"]
+    assert 4 * 20 + 5 not in out["sq"]
+
+
+def test_assign_cells_hole_excluded():
+    shell = _square(0.5, 0.5, 1.5, 1.5)
+    hole = _square(0.8, 0.8, 1.2, 1.2)  # 4x4 = 16 cells
+    poly = {"id": "ring", "geometry": {"type": "Polygon", "coordinates": [shell, hole]}}
+    out = firms_pipeline.assign_cells([poly], **_synthetic_grid())
+    assert len(out["ring"]) == 100 - 16
+    assert 9 * 20 + 9 not in out["ring"]  # centre of the hole
+
+
+def test_assign_cells_multipolygon_and_no_duplicates():
+    a = {"id": "a", "geometry": {"type": "MultiPolygon", "coordinates": [
+        [_square(0.0, 0.0, 0.5, 0.5)], [_square(1.0, 1.0, 1.5, 1.5)]]}}
+    b = {"id": "b", "geometry": {"type": "Polygon", "coordinates": [_square(0.3, 0.3, 0.8, 0.8)]}}  # overlaps a
+    out = firms_pipeline.assign_cells([a, b], **_synthetic_grid())
+    assert len(out["a"]) == 50
+    assert not set(out["a"]) & set(out["b"])
+    assert len(out["b"]) == 25 - 4  # the 2x2 overlap stays with the first polygon
+
+
+def test_assign_cells_ignores_cells_not_in_grid_ids():
+    poly = {"id": "sq", "geometry": {"type": "Polygon", "coordinates": [_square(0.5, 0.5, 1.5, 1.5)]}}
+    g = _synthetic_grid()
+    g["cell_ids"] = {5 * 20 + 5}
+    assert firms_pipeline.assign_cells([poly], **g) == {"sq": [105]}
+
+
+def test_department_slug_and_name():
+    assert firms_pipeline.dept_slug("Alto Paraguay") == "alto-paraguay"
+    assert firms_pipeline.dept_slug("Boquerón") == "boqueron"
+    assert firms_pipeline.dept_slug("Ñeembucú") == "neembucu"
+
+
+def test_departments_real_data():
+    gj = ROOT / "data" / "ext" / "pry_adm1.geojson"
+    if not gj.exists():
+        pytest.skip("data/ext/pry_adm1.geojson not present")
+    grid = json.loads((ROOT / "data" / "app" / "grid.json").read_text(encoding="utf-8"))
+    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid)
+    assert len(deps) == 17
+    assert len({d["id"] for d in deps}) == 17
+    seen = set()
+    for d in deps:
+        assert d["cells"], d["id"]
+        assert not seen & set(d["cells"]), f"duplicate cell in {d['id']}"
+        seen |= set(d["cells"])
+        w, s, e, n = d["bbox"]
+        assert w < e and s < n
+        assert d["geometry"]["type"] == "MultiPolygon"
+    grid_ids = {c[0] for c in grid["cells"]}
+    assert seen <= grid_ids
+    assert len(seen) / len(grid_ids) >= 0.99

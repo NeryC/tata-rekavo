@@ -9,6 +9,7 @@ Subcommands
   export-hotspots  Individual hotspots 2002-2025 in 1-degree gzip blocks, for per-search CSV downloads
   validate       Hold-out validation of the harmonization + error model + figure
   fetch-current  Pull recent months from the FIRMS Area API (needs a free MAP_KEY); best VIIRS product per day
+  build-regions  Department boundaries (geoBoundaries ADM1) and which 0.1-degree grid cells belong to each department
 
 Method (short)
   Unit: "VIIRS S-NPP-equivalent hotspots".
@@ -714,6 +715,180 @@ def cmd_export_hotspots(args):
     log(f"hotspots/: {len(index)} blocks, {len(out):,} hotspots, {size/1e6:.1f} MB gzipped")
 
 
+# ----------------------------------------------------------------------------- build-regions
+GEOBOUNDARIES_API = "https://www.geoboundaries.org/api/current/gbOpen/{iso3}/{level}/"
+
+# display names for the 17 departments (the source file may lack accents); key = slug
+DEPT_NAMES = {
+    "alto-paraguay": "Alto Paraguay", "alto-parana": "Alto Paraná", "amambay": "Amambay",
+    "boqueron": "Boquerón", "caaguazu": "Caaguazú", "caazapa": "Caazapá", "canindeyu": "Canindeyú",
+    "central": "Central", "concepcion": "Concepción", "cordillera": "Cordillera", "guaira": "Guairá",
+    "itapua": "Itapúa", "misiones": "Misiones", "neembucu": "Ñeembucú", "paraguari": "Paraguarí",
+    "presidente-hayes": "Presidente Hayes", "san-pedro": "San Pedro",
+}
+
+
+def dept_slug(name):
+    """Lowercase ASCII slug: accents stripped, whitespace -> '-'."""
+    import re
+    import unicodedata
+    base = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
+
+
+def fetch_boundaries(iso3, level, out):
+    """Download the simplified geoBoundaries (gbOpen) GeoJSON for a country/admin level into `out`
+    (a file path, or a directory in which case it is named <iso3>_<level>.geojson). Returns the path."""
+    from pathlib import Path
+    api = GEOBOUNDARIES_API.format(iso3=iso3.upper(), level=level.upper())
+    _, body = http_get(api, timeout=60)
+    url = json.loads(body)["simplifiedGeometryGeoJSON"]
+    _, geo = http_get(url, timeout=120)
+    json.loads(geo)  # must be valid JSON before anything is written
+    out = Path(out)
+    if out.suffix == "" or out.is_dir():
+        out = out / f"{iso3.lower()}_{level.lower()}.geojson"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(geo)
+    log(f"{out}: {len(geo)/1e3:.0f} KB from {url}")
+    return out
+
+
+def _geom_polygons(geom):
+    """GeoJSON Polygon/MultiPolygon -> list of polygons, each a list of rings (outer first, then holes)."""
+    if geom["type"] == "Polygon":
+        return [geom["coordinates"]]
+    if geom["type"] == "MultiPolygon":
+        return geom["coordinates"]
+    raise ValueError(f"unsupported geometry {geom['type']}")
+
+
+def assign_cells(polygons, deg, lat0, lon0, rows, cols, cell_ids):
+    """Assign grid cells to polygons by cell centre. `polygons` = [{"id": str, "geometry": GeoJSON
+    Polygon|MultiPolygon}, ...]; returns {id: sorted cell indices} restricted to `cell_ids`.
+    Holes are excluded; a cell claimed by several polygons stays with the first one."""
+    from matplotlib.path import Path as MPath
+    idx = np.array(sorted(int(c) for c in cell_ids if 0 <= int(c) < rows * cols), dtype=np.int64)
+    r, c = idx // cols, idx % cols
+    centres = np.column_stack([lon0 + (c + 0.5) * deg, lat0 + (r + 0.5) * deg])
+    free = np.ones(len(idx), dtype=bool)
+    out = {}
+    for poly in polygons:
+        inside = np.zeros(len(idx), dtype=bool)
+        for rings in _geom_polygons(poly["geometry"]):
+            m = MPath(np.asarray(rings[0], dtype=float)).contains_points(centres)
+            for hole in rings[1:]:
+                m &= ~MPath(np.asarray(hole, dtype=float)).contains_points(centres)
+            inside |= m
+        take = inside & free
+        free &= ~take
+        out[poly["id"]] = [int(i) for i in idx[take]]
+    return out
+
+
+def _round_coords(x, nd):
+    if isinstance(x[0], (int, float)):
+        return [round(float(v), nd) for v in x]
+    return [_round_coords(y, nd) for y in x]
+
+
+def _union_geoms(geoms):
+    """Union of Polygon/MultiPolygon geometries without shapely: the polygons are grouped into one
+    MultiPolygon, valid here because the merged units (Asuncion + Central) are adjacent and do not overlap."""
+    polys = []
+    for g in geoms:
+        polys += _geom_polygons(g)
+    return {"type": "MultiPolygon", "coordinates": polys}
+
+
+def _dist_to_geom(pt, geom):
+    """Planar distance (degrees) from a point to the boundary of a geometry."""
+    best = np.inf
+    p = np.asarray(pt, dtype=float)
+    for rings in _geom_polygons(geom):
+        for ring in rings:
+            a = np.asarray(ring, dtype=float)
+            s, e = a[:-1], a[1:]
+            d = e - s
+            L = np.maximum((d ** 2).sum(1), 1e-18)
+            t = np.clip(((p - s) * d).sum(1) / L, 0, 1)
+            proj = s + t[:, None] * d
+            best = min(best, float(np.sqrt(((proj - p) ** 2).sum(1)).min()))
+    return best
+
+
+def build_departments(geojson, grid, report=None):
+    """geoBoundaries ADM1 FeatureCollection + grid.json -> list of department dicts
+    {id, name, cells, bbox, geometry}. Asuncion is merged into Central. Grid cells whose centre falls
+    outside every polygon (border cells of the 0.1-degree grid vs the simplified outline) are assigned to
+    the department with the nearest boundary, provided the centre is within one cell diagonal of it.
+    If `report` (a dict) is given it receives the coverage before/after that step."""
+    g = grid["meta"]["grid"]
+    cell_ids = {int(c[0]) for c in grid["cells"]}
+    units = {}
+    for ft in geojson["features"]:
+        props = ft["properties"]
+        slug = dept_slug(props.get("shapeName") or props.get("name"))
+        if slug in ("asuncion", "capital"):
+            slug = "central"
+        units.setdefault(slug, []).append(ft["geometry"])
+    if set(units) != set(DEPT_NAMES):
+        raise ValueError(f"unexpected department set: unknown={sorted(set(units) - set(DEPT_NAMES))}, "
+                         f"missing={sorted(set(DEPT_NAMES) - set(units))}")
+    geoms = {k: (v[0] if len(v) == 1 else _union_geoms(v)) for k, v in units.items()}
+    order = sorted(geoms)
+    args = dict(deg=g["deg"], lat0=g["lat0"], lon0=g["lon0"], rows=g["rows"], cols=g["cols"], cell_ids=cell_ids)
+    cells = assign_cells([{"id": k, "geometry": geoms[k]} for k in order], **args)
+    assigned = {c for v in cells.values() for c in v}
+    before = len(assigned) / len(cell_ids)
+    reach = g["deg"] * 2 ** 0.5
+    for cid in sorted(cell_ids - assigned):
+        r, c = divmod(cid, g["cols"])
+        pt = (g["lon0"] + (c + 0.5) * g["deg"], g["lat0"] + (r + 0.5) * g["deg"])
+        dist = {k: _dist_to_geom(pt, geoms[k]) for k in order}
+        k = min(dist, key=dist.get)
+        if dist[k] <= reach:
+            cells[k].append(cid)
+            assigned.add(cid)
+    for v in cells.values():
+        v.sort()
+    if report is not None:
+        report.update(before=before, after=len(assigned) / len(cell_ids), unassigned=sorted(cell_ids - assigned))
+    out = []
+    for k in order:
+        coords = _round_coords(_geom_polygons(geoms[k]), 3)
+        xs = [pt[0] for poly in coords for pt in poly[0]]
+        ys = [pt[1] for poly in coords for pt in poly[0]]
+        out.append({"id": k, "name": DEPT_NAMES[k], "cells": cells[k],
+                    "bbox": [min(xs), min(ys), max(xs), max(ys)],
+                    "geometry": {"type": "MultiPolygon", "coordinates": coords}})
+    return out
+
+
+def cmd_build_regions(args):
+    from pathlib import Path
+    gj = Path(args.ext) / "pry_adm1.geojson"
+    if args.refresh or not gj.exists():
+        fetch_boundaries("PRY", "ADM1", gj)
+    geojson = json.loads(gj.read_bytes())
+    with open(os.path.join(args.out, "grid.json"), encoding="utf-8") as fh:
+        grid = json.load(fh)
+    rep = {}
+    deps = build_departments(geojson, grid, rep)
+    meta = {"source": "geoBoundaries gbOpen PRY ADM1", "license": "CC BY 4.0",
+            "url": GEOBOUNDARIES_API.format(iso3="PRY", level="ADM1"),
+            "retrieved": dt.date.today().isoformat(),
+            "note": "Simplified department boundaries (geoBoundaries; original source DGEEC Paraguay). Asuncion is merged "
+                    "into Central (17 departments). A cell belongs to the department containing its centre; grid cells "
+                    "whose centre falls just outside the simplified outline go to the nearest department."}
+    path = os.path.join(args.out, "departments.json")
+    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"meta": meta, "departments": deps}, fh, ensure_ascii=False, separators=(",", ":"))
+    atomic_replace([path + ".tmp"])
+    log(f"departments.json: {len(deps)} departments, {os.path.getsize(path)/1e3:.0f} KB, "
+        f"coverage {rep['before']:.2%} -> {rep['after']:.2%}, unassigned {len(rep['unassigned'])}")
+
+
 # ----------------------------------------------------------------------------- main
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -725,8 +900,11 @@ def main():
     f = sp.add_parser("fetch-current"); f.add_argument("--out", default="data/app"); f.add_argument("--map-key")
     f.add_argument("--start", default="2026-01-01"); f.add_argument("--end"); f.add_argument("--cache", default="data/api_cache")
     f.add_argument("--offline", action="store_true", help="build current.json from cached windows only, no API calls")
+    r = sp.add_parser("build-regions"); r.add_argument("--out", default="data/app"); r.add_argument("--ext", default="data/ext")
+    r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/pry_adm1.geojson exists")
     a = p.parse_args()
-    {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current}[a.cmd](a)
+    {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current,
+     "build-regions": cmd_build_regions}[a.cmd](a)
 
 
 if __name__ == "__main__":
