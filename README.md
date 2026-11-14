@@ -83,6 +83,25 @@ The approach follows the same principle used in the literature to bridge the MOD
 
 `test_contract.mjs` checks it against the pipeline output.
 
+## Web app (`app/`)
+
+**Is this fire normal?** Pick Paraguay, the Chaco, the Oriental region, or draw any area on the map, then pick a month:
+
+- **Verdict:** the month against the median of the same month in previous years, with its error band. Months still in progress are compared with the same share of a typical month.
+- **Burning calendar:** years × months, colored by the ratio to the usual level. Months before 2012, reconstructed from MODIS, are hatched.
+- **Hotspots per year:** a toggle between the harmonized record and the raw sensors stitched together, which shows the false 2012 jump.
+- **Map:** hotspots per ~11 km cell for the month, plus the individual VIIRS hotspots for 2026.
+- **CSV downloads:** the monthly series of the area, and the 2026 hotspots inside it.
+
+Stack: React + TypeScript + Vite + MapLibre GL. It is a static site with no backend. It reads `data/app/` and uses the same `harmonized.js` the pipeline tests run against.
+
+```bash
+cd app
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # static site in app/dist (deploy app/ on Vercel or any static host)
+```
+
 ## Run it
 
 ```bash
