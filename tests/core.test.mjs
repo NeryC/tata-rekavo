@@ -100,6 +100,12 @@ test("departmentRanking puts a solid anomaly above a lowSignal one", () => {
   assert.ok(Number.isFinite(r[0].relativeError));
 });
 
+test("departmentRanking: a typical month of exactly 10 is solid, 9 is lowSignal", () => {
+  const g = synthGrid({ 1: { history: [10, 10, 10, 10], value: 11 }, 2: { history: [9, 9, 9, 9], value: 90 } });
+  const r = departmentRanking(g, [dep("edge", 1), dep("below", 2)], 48);
+  assert.deepEqual(r.map((x) => [x.id, x.lowSignal]), [["edge", false], ["below", true]]);
+});
+
 test("departmentRanking: median 0 and value 0 gives ratio 1", () => {
   const g = synthGrid({ 1: { history: [0, 0, 0, 0], value: 0 } });
   const [r] = departmentRanking(g, [dep("z", 1)], 48);

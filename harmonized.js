@@ -189,13 +189,13 @@ export function verdict(grid, series, m, coverage = 1) {
 }
 
 /** Departments with a median below this many hotspots have too little history to rank by ratio. */
-const LOW_SIGNAL_MEDIAN = 3;
+const LOW_SIGNAL_MEDIAN = 10;
 
 /**
  * Ranks departments by how abnormal month m is for them.
  * departments: departments.json "departments" array ({id, name, cells}). Each is judged with verdict()
- * on its own harmonized series. Rows with median >= 3 come first, by ratio descending (Infinity first);
- * then the lowSignal rows (median < 3 or no history at all, i.e. NaN median; ratio unreliable) by value descending.
+ * on its own harmonized series. Rows with median >= 10 come first, by ratio descending (Infinity first);
+ * then the lowSignal rows (median < 10 or no history at all, i.e. NaN median; ratio unreliable) by value descending.
  * Ties: value desc, then name. For a partial month (coverage < 1) lowSignal is judged on the coverage-scaled median.
  * Returns [{id, name, value, median, ratio, classId, relativeError, lowSignal, partial}].
  */
