@@ -188,6 +188,33 @@ export function verdict(grid, series, m, coverage = 1) {
   };
 }
 
+/** Departments with a median below this many hotspots have too little history to rank by ratio. */
+const LOW_SIGNAL_MEDIAN = 3;
+
+/**
+ * Ranks departments by how abnormal month m is for them.
+ * departments: departments.json "departments" array ({id, name, cells}). Each is judged with verdict()
+ * on its own harmonized series. Rows with median >= 3 come first, by ratio descending (Infinity first);
+ * then the lowSignal rows (median < 3, ratio unreliable) by value descending. Ties: value desc, then name.
+ * Returns [{id, name, value, median, ratio, classId, relativeError, lowSignal, partial}].
+ */
+export function departmentRanking(grid, departments, m, coverage = 1) {
+  const rows = departments.map((d) => {
+    const v = verdict(grid, zoneSeries(grid, d.cells).harmonized, m, coverage);
+    return {
+      id: d.id, name: d.name, value: v.value, median: v.median, ratio: v.ratio,
+      classId: v.class.id, relativeError: v.relativeError,
+      lowSignal: v.median < LOW_SIGNAL_MEDIAN, partial: v.partial,
+    };
+  });
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  return rows.sort((a, b) =>
+    cmp(a.lowSignal, b.lowSignal)
+    || (a.lowSignal ? 0 : cmp(b.ratio, a.ratio))
+    || cmp(b.value, a.value)
+    || a.name.localeCompare(b.name, "es"));
+}
+
 /** Calendar matrix (years x 12) with ratio to the calendar-month median over the whole record. */
 export function calendar(grid, series) {
   const meta = grid.meta, n = grid.nMonths;

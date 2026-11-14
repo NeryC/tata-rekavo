@@ -73,4 +73,19 @@ check(burned > 0, `burn history decodes (${burned} of ~62,500 fine cells in the 
 const out = H.seriesToCSV(grid, s);
 check(out.split("\n").length === grid.nMonths + 2, `zone CSV has ${grid.nMonths} rows`);
 
+// 9. departments: the 17 department series add up to the country series
+let deps = null;
+try { deps = JSON.parse(readFileSync(join(dir, "departments.json"), "utf8")).departments; } catch {}
+if (!deps) console.log("     note: departments.json not found in " + dir + ", skipping department checks");
+else {
+  const sum = new Float64Array(grid.nMonths);
+  for (const d of deps) { const hs = H.zoneSeries(grid, d.cells).harmonized; for (let m = 0; m < sum.length; m++) sum[m] += hs[m]; }
+  let worst = 0, n = 0;
+  for (let m = 0; m < grid.nMonths; m++) {
+    if (all.harmonized[m] <= 100) continue;
+    n++; worst = Math.max(worst, Math.abs(sum[m] - all.harmonized[m]) / all.harmonized[m]);
+  }
+  check(deps.length === 17 && n > 0 && worst < 0.01, `${deps.length} department series sum to the country series in ${n} months with >100 hotspots (max rel diff ${worst.toExponential(2)})`);
+}
+
 process.exit(fails ? 1 : 0);

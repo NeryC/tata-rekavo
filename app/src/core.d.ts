@@ -39,6 +39,12 @@ export function relativeError(meta: GridMeta, m: number, value: number): number;
 export function classify(meta: GridMeta, ratio: number): ClassDef;
 export function monthCoverage(meta: GridMeta, m: number, current?: CurrentMeta | string | null): number;
 export function verdict(grid: Grid, series: Float64Array, m: number, coverage?: number): Verdict;
+export interface DepartmentDef { id: string; name: string; cells: number[] }
+export interface DepartmentRow {
+  id: string; name: string; value: number; median: number; ratio: number;
+  classId: ClassDef["id"]; relativeError: number; lowSignal: boolean; partial: boolean;
+}
+export function departmentRanking(grid: Grid, departments: DepartmentDef[], m: number, coverage?: number): DepartmentRow[];
 export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null }
 export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
 export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;

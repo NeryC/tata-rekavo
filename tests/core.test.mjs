@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { classify, indexOf, monthOf, validationSummary, verdict } from "../harmonized.js";
+import {
+  classify, decodeGrid, departmentRanking, indexOf, monthOf, validationSummary, verdict,
+} from "../harmonized.js";
 
 const grid = JSON.parse(
   readFileSync(new URL("../data/app/grid.json", import.meta.url), "utf8"),
@@ -70,4 +72,89 @@ test("validationSummary omits missing areas and nulls missing agreement", () => 
 test("validationSummary without meta.validation is empty", () => {
   assert.deepEqual(validationSummary({}), { rows: [], spearman: null, nMonths: 0 });
   assert.deepEqual(validationSummary({ validation: {} }), { rows: [], spearman: null, nMonths: 0 });
+});
+
+// --- departmentRanking -------------------------------------------------------
+
+/** Synthetic grid: one cell per department, history in months 0..36 (same calendar month), value at month 48. */
+function synthGrid(cellSpecs) {
+  const cells = new Map();
+  for (const [id, { history, value }] of Object.entries(cellSpecs)) {
+    const m = [0, 12, 24, 36, 48], h = [...history, value];
+    cells.set(+id, { m, h, modis: h.slice(), viirs: h.slice() });
+  }
+  return { meta, cells, nMonths: 49 };
+}
+const dep = (id, cell) => ({ id, name: id.toUpperCase(), cells: [cell] });
+
+test("departmentRanking puts a solid anomaly above a lowSignal one", () => {
+  const g = synthGrid({ 1: { history: [10, 10, 10, 10], value: 40 }, 2: { history: [1, 1, 1, 1], value: 10 } });
+  const r = departmentRanking(g, [dep("low", 2), dep("hi", 1)], 48);
+  assert.deepEqual(r.map((x) => x.id), ["hi", "low"]);
+  assert.equal(r[0].lowSignal, false);
+  assert.equal(r[0].median, 10);
+  assert.equal(r[0].ratio, 4);
+  assert.equal(r[0].classId, "extreme");
+  assert.equal(r[1].lowSignal, true);
+  assert.equal(r[1].partial, false);
+  assert.ok(Number.isFinite(r[0].relativeError));
+});
+
+test("departmentRanking: median 0 and value 0 gives ratio 1", () => {
+  const g = synthGrid({ 1: { history: [0, 0, 0, 0], value: 0 } });
+  const [r] = departmentRanking(g, [dep("z", 1)], 48);
+  assert.equal(r.ratio, 1);
+  assert.equal(r.lowSignal, true);
+});
+
+test("departmentRanking orders solid by ratio desc, then lowSignal by value desc", () => {
+  const g = synthGrid({
+    1: { history: [10, 10, 10, 10], value: 12 },   // ratio 1.2, solid
+    2: { history: [10, 10, 10, 10], value: 30 },   // ratio 3, solid
+    3: { history: [0, 0, 0, 0], value: 5 },        // lowSignal, Infinity ratio, value 5
+    4: { history: [2, 2, 2, 2], value: 9 },        // lowSignal, value 9
+  });
+  const r = departmentRanking(g, [dep("a", 1), dep("b", 2), dep("c", 3), dep("d", 4)], 48);
+  assert.deepEqual(r.map((x) => x.id), ["b", "a", "d", "c"]);
+  assert.equal(r[3].ratio, Infinity);
+});
+
+test("departmentRanking reports Infinity when the scaled median is 0 and value > 0", () => {
+  // With coverage 0 the median is 0, so any positive value has Infinity ratio; lowSignal is then true too.
+  const g = synthGrid({ 1: { history: [10, 10, 10, 10], value: 7 } });
+  const [r] = departmentRanking(g, [dep("x", 1)], 48, 0);
+  assert.equal(r.ratio, Infinity);
+  assert.equal(r.lowSignal, true);
+});
+
+test("departmentRanking breaks ties by value desc then name", () => {
+  const g = synthGrid({
+    1: { history: [10, 10, 10, 10], value: 20 },
+    2: { history: [20, 20, 20, 20], value: 40 },
+    3: { history: [10, 10, 10, 10], value: 20 },
+    4: { history: [5, 5, 5, 5], value: 10 },
+  });
+  const r = departmentRanking(g, [dep("c", 3), dep("a", 1), dep("b", 2), dep("d", 4)], 48);
+  // all ratio 2: value desc (b=40), then 20s by name (A, C), then d=10
+  assert.deepEqual(r.map((x) => x.id), ["b", "a", "c", "d"]);
+});
+
+test("departmentRanking passes coverage through (partial month)", () => {
+  const g = synthGrid({ 1: { history: [10, 10, 10, 10], value: 5 } });
+  const [r] = departmentRanking(g, [dep("p", 1)], 48, 0.5);
+  assert.equal(r.partial, true);
+  assert.equal(r.median, 5);
+  assert.equal(r.ratio, 1);
+});
+
+test("departmentRanking on real data: 17 departments with finite medians", () => {
+  const departments = JSON.parse(
+    readFileSync(new URL("../data/app/departments.json", import.meta.url), "utf8"),
+  ).departments;
+  const g = decodeGrid(grid);
+  const m = g.meta.months.count - 1;
+  const r = departmentRanking(g, departments, m);
+  assert.equal(r.length, 17);
+  assert.ok(r.every((x) => Number.isFinite(x.median) && Number.isFinite(x.value)));
+  assert.equal(new Set(r.map((x) => x.id)).size, 17);
 });
