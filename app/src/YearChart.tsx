@@ -5,31 +5,36 @@ import { useI18n } from "./i18n";
 
 interface Props { grid: Grid; series: Series; naive: boolean; selectedYear: number; lastPartial: boolean }
 
-const C = { translated: "#6250d6", observed: "#eb6834", modisRaw: "#898781" };
+export const C = { translated: "#6250d6", observed: "#eb6834", modisRaw: "#898781" };
+
+export interface YearTotal { year: number; h: number; n: number; translated: boolean; err: number }
+/** Yearly harmonized and naive totals, with the error band of translated years. */
+export function yearTotals(grid: Grid, series: Series): YearTotal[] {
+  const meta = grid.meta, em = meta.error_model;
+  const out = new Map<number, { h: number; n: number; rnd2: number; sys: number; preMonths: number; months: number }>();
+  for (let m = 0; m < grid.nMonths; m++) {
+    const { year } = H.monthOf(meta, m);
+    const o = out.get(year) ?? { h: 0, n: 0, rnd2: 0, sys: 0, preMonths: 0, months: 0 };
+    o.months++;
+    const v = series.harmonized[m];
+    o.h += v; o.n += series.naive[m];
+    if (m < meta.months.viirs_start_index) {
+      const rnd = Math.min(1, em.c * Math.pow(Math.max(v, 1), -em.p));
+      o.rnd2 += (rnd * v) ** 2; o.sys = em.sys_by_year[String(year)] ?? 0; o.preMonths++;
+    }
+    out.set(year, o);
+  }
+  return [...out.entries()].map(([year, o]) => ({
+    year, h: o.h, n: o.n, translated: o.preMonths * 2 > o.months,
+    err: o.preMonths ? Math.sqrt(o.rnd2 + (o.sys * o.h) ** 2) : 0,
+  }));
+}
 
 export default function YearChart({ grid, series, naive, selectedYear, lastPartial }: Props) {
   const meta = grid.meta;
   const { t, num } = useI18n();
   const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
-  const years = useMemo(() => {
-    const em = meta.error_model;
-    const out = new Map<number, { h: number; n: number; rnd2: number; sys: number; preMonths: number }>();
-    for (let m = 0; m < grid.nMonths; m++) {
-      const { year } = H.monthOf(meta, m);
-      const o = out.get(year) ?? { h: 0, n: 0, rnd2: 0, sys: 0, preMonths: 0 };
-      const v = series.harmonized[m];
-      o.h += v; o.n += series.naive[m];
-      if (m < meta.months.viirs_start_index) {
-        const rnd = Math.min(1, em.c * Math.pow(Math.max(v, 1), -em.p));
-        o.rnd2 += (rnd * v) ** 2; o.sys = em.sys_by_year[String(year)] ?? 0; o.preMonths++;
-      }
-      out.set(year, o);
-    }
-    return [...out.entries()].map(([year, o]) => ({
-      year, h: o.h, n: o.n, translated: o.preMonths > 6,
-      err: o.preMonths ? Math.sqrt(o.rnd2 + (o.sys * o.h) ** 2) : 0,
-    }));
-  }, [grid, series, meta]);
+  const years = useMemo(() => yearTotals(grid, series), [grid, series]);
 
   const W = 420, Hh = 170, L = 38, B = 20, T = 8;
   const max = Math.max(...years.map((y) => Math.max(y.h + y.err, y.n))) * 1.05 || 1;

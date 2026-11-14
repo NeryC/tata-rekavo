@@ -114,7 +114,7 @@ export function relativeError(meta, m, value) {
   const em = meta.error_model;
   const rnd = Math.min(1, em.c * Math.pow(Math.max(value, 1), -em.p));
   const sys = em.sys_by_year[String(monthOf(meta, m).year)] || 0;
-  return Math.sqrt(rnd * rnd + sys * sys);
+  return Math.min(1, Math.sqrt(rnd * rnd + sys * sys));
 }
 
 function median(a) {

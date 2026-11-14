@@ -17,21 +17,49 @@ export const BINS: { max: number; color: string; label: string }[] = [
 ];
 export const binOf = (r: number) => BINS.find((b) => r < b.max) ?? BINS[BINS.length - 1];
 
+// sequential warm ramp for counts (one hue family, light = few, dark = many)
+export const COUNT_COLORS = ["#fdf0e0", "#fbd3a6", "#f8b072", "#f08a44", "#dc6223", "#b2401a", "#7f1d0a"];
+const nice = (v: number) => {
+  if (v < 10) return Math.max(1, Math.round(v));
+  const p = Math.pow(10, Math.floor(Math.log10(v)) - 1);
+  return Math.round(v / p) * p;
+};
+/** Count thresholds from the zone's own distribution (quantiles of non-zero months), rounded. */
+export function countScale(values: number[]) {
+  const nz = values.filter((v) => v > 0).sort((a, b) => a - b);
+  if (!nz.length) return { thresholds: [1], colorOf: (_v: number) => COUNT_COLORS[0] };
+  const q = (p: number) => nz[Math.min(nz.length - 1, Math.floor(p * nz.length))];
+  const thresholds = [...new Set([0.15, 0.3, 0.5, 0.7, 0.85, 0.95].map((p) => nice(q(p))))];
+  const colorOf = (v: number) => {
+    if (v <= 0) return "#f7f6f2";
+    let i = 0;
+    while (i < thresholds.length && v >= thresholds[i]) i++;
+    return COUNT_COLORS[Math.min(i, COUNT_COLORS.length - 1)];
+  };
+  return { thresholds, colorOf };
+}
+
+export type CalMode = "ratio" | "count";
+
 interface Props {
   grid: Grid;
   series: Float64Array;
   coverage: (m: number) => number;
   selected: number;
   onSelect: (m: number) => void;
+  mode: CalMode;
+  range: [number, number];
 }
 
-export default function Calendar({ grid, series, coverage, selected, onSelect }: Props) {
+export default function Calendar({ grid, series, coverage, selected, onSelect, mode, range }: Props) {
   const i18n = useI18n();
   const { t, num } = i18n;
   const cal = useMemo(() => H.calendar(grid, series), [grid, series]);
-  const binLabel = (l: string) => (l === "≈ normal" ? t.normalBin : i18n.lang === "es" ? l.replace(".", ",") : l);
+  const scale = useMemo(() => countScale([...series, ...cal.monthlyMedian]), [series, cal]);
   const [tip, setTip] = useState<{ x: number; y: number; html: string[] } | null>(null);
   const rows = [...cal.rows].reverse();
+  const binLabel = (l: string) => (l === "≈ normal" ? t.normalBin : i18n.lang === "es" ? l.replace(".", ",") : l);
+  const typicalTotal = cal.monthlyMedian.reduce((a, b) => a + b, 0);
 
   return (
     <div className="calendar" onMouseLeave={() => setTip(null)}>
@@ -41,6 +69,17 @@ export default function Calendar({ grid, series, coverage, selected, onSelect }:
           {i18n.initials.map((l, i) => <span key={i} className="cal-mh" role="columnheader" aria-label={i18n.monthShort(i + 1)}>{l}</span>)}
           <span className="cal-mh total">{t.year}</span>
         </div>
+        {mode === "count" && (
+          <div className="cal-row typical" role="row">
+            <span className="cal-year">{t.typicalRow}</span>
+            {cal.monthlyMedian.map((v, i) => (
+              <span key={i} role="gridcell" className="cal-cell static" style={{ background: scale.colorOf(v) }}
+                aria-label={`${t.typicalRow} ${i18n.monthShort(i + 1)}: ${num(v)}`}
+                onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: [`${t.typicalRow} · ${i18n.monthShort(i + 1)}`, `${num(v)} ${t.hotspots}`] })} />
+            ))}
+            <span className="cal-total">{typicalTotal >= 1000 ? `${Math.round(typicalTotal / 1000)}k` : num(typicalTotal)}</span>
+          </div>
+        )}
         {rows.map((row) => (
           <div className="cal-row" role="row" key={row.year}>
             <span className="cal-year">{row.year}</span>
@@ -50,35 +89,29 @@ export default function Calendar({ grid, series, coverage, selected, onSelect }:
               if (cov === 0) return <span key={i} className="cal-cell empty" />;
               const med = cal.monthlyMedian[i] * cov;
               const ratio = med > 0 ? c.value / med : c.value > 0 ? 9 : 1;
-              const b = binOf(ratio);
+              const color = mode === "ratio" ? binOf(ratio).color : scale.colorOf(c.value);
               const err = c.relativeError;
-            
-              let catadorInsight = "";
-              if (ratio > 2 && err > 0.15) {
-                catadorInsight = "⚠️ Validación Física: Anomalía extrema con incertidumbre alta. Requiere revisión de imagen satelital.";
-              } else if (ratio > 1.5 && err < 0.1) {
-                catadorInsight = "✅ Validación Física: Anomalía térmica real confirmada. La harmonización filtró ruido efectivamente.";
-              } else if (cov < 1) {
-                catadorInsight = "ℹ️ Mes en curso o con datos parciales. Cobertura: " + Math.round(cov * 100) + "%";
-              } else if (ratio < 0.5) {
-                catadorInsight = "✅ Validación Física: Actividad por debajo del umbral histórico normal. Sin riesgos aparentes.";
-              } else {
-                catadorInsight = "✅ Validación Física: Comportamiento dentro de los parámetros históricos esperados para esta estación.";
-              }
-              
+              const out = c.m < range[0] || c.m > range[1];
+              // "Modo Catador": turns the model uncertainty into a field-validation hint
+              const cat = t.catador;
+              const catadorInsight = ratio > 2 && err > 0.15 ? cat.warnHigh
+                : ratio > 1.5 && err < 0.1 ? cat.realHigh
+                : cov < 1 ? cat.partial(Math.round(cov * 100))
+                : ratio < 0.5 ? cat.low
+                : cat.normal;
               const lines = [
                 `${i18n.monthLabel(row.year, i + 1)}${cov < 1 ? t.calFirstPct(Math.round(cov * 100)) : ""}`,
                 `${num(c.value)} ${t.hotspots}${err > 0 ? ` ±${Math.round(err * 100)}%` : ""}`,
                 t.calVsUsual(i18n.ratio(ratio), i18n.monthShort(i + 1), num(med)),
-                err > 0 ? "🔄 Armonizado por Tata Rekavo" : "🛰️ Observación directa VIIRS", // Mejora de texto para jueces
+                err > 0 ? cat.harmonizedBy : cat.observedDirect,
+                ...(out ? [t.outOfRange] : []),
                 "────────────────────",
-                `🐺 ${catadorInsight}`
+                `🐺 ${catadorInsight}`,
               ];
-            
               return (
                 <button key={i} role="gridcell" aria-label={lines.join(", ")} aria-selected={c.m === selected}
-                  className={`cal-cell${c.m === selected ? " sel" : ""}${err > 0 ? " translated" : ""}${cov < 1 ? " partial" : ""}`}
-                  style={{ background: b.color }}
+                  className={`cal-cell${c.m === selected ? " sel" : ""}${err > 0 ? " translated" : ""}${cov < 1 ? " partial" : ""}${out ? " out" : ""}`}
+                  style={{ background: color }}
                   onClick={() => onSelect(c.m)}
                   onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: lines })} />
               );
@@ -88,9 +121,14 @@ export default function Calendar({ grid, series, coverage, selected, onSelect }:
         ))}
       </div>
       <div className="cal-legend">
-        {BINS.map((b) => <span key={b.label}><i style={{ background: b.color }} />{binLabel(b.label)}</span>)}
+        {mode === "ratio"
+          ? BINS.map((b) => <span key={b.label}><i style={{ background: b.color }} />{binLabel(b.label)}</span>)
+          : [0, ...scale.thresholds].map((th, k, arr) => (
+            <span key={k}><i style={{ background: COUNT_COLORS[Math.min(k, COUNT_COLORS.length - 1)] }} />
+              {k === arr.length - 1 ? `${num(th)}+` : `${num(k === 0 ? 1 : th)}–${num(arr[k + 1])}`}</span>
+          ))}
       </div>
-      <p className="note">{t.calNote}</p>
+      <p className="note">{mode === "ratio" ? t.calNote : t.calNoteCount}</p>
       {tip && (
         <div className="tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>
           <b>{tip.html[0]}</b>{tip.html.slice(1).map((l) => <div key={l}>{l}</div>)}

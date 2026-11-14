@@ -6,6 +6,7 @@ NASA Space Apps Challenge 2026 - "Harmonization of MODIS and VIIRS Hot Spots"
 Subcommands
   download       Download FIRMS yearly country archives (MODIS, VIIRS S-NPP, VIIRS NOAA-20)
   build          Build the harmonized dataset the web app reads (grid x month, VIIRS-equivalent)
+  export-hotspots  Individual hotspots 2002-2025 in 1-degree gzip blocks, for per-search CSV downloads
   validate       Hold-out validation of the harmonization + error model + figure
   fetch-current  Pull recent months from the FIRMS Area API (needs a free MAP_KEY); best VIIRS product per day
 
@@ -636,18 +637,60 @@ def cmd_fetch_current(args):
         f"coverage {', '.join(f'{index_to_ym(m)[1]:02d}:{v:.0%}' for m, v in month_cov.items())}")
 
 
+# ----------------------------------------------------------------------------- export-hotspots
+def cmd_export_hotspots(args):
+    """Individual hotspots of the harmonized period, split in 1-degree blocks (gzip CSV) so the app
+    can download only the blocks a search touches."""
+    import gzip
+    a = load_archives(args.data)
+    v = vegetation(a).copy()
+    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["m"] = month_index(v.year.values, v.month.values)
+    flags = daily_flags(v)
+    f, _ = compute_factors(v, flags)
+    v["w"], v["hsrc"] = harmonized_weights(v, flags, f)
+    v = v[v.m >= 0]
+    prod = {"aqua": "MODIS_SP", "terra": "MODIS_SP", "snpp": "VIIRS_SNPP_SP", "n20": "VIIRS_NOAA20_SP"}
+    out = pd.DataFrame({
+        "latitude": v.latitude.round(5), "longitude": v.longitude.round(5),
+        "acq_date": v.date.dt.strftime("%Y-%m-%d"), "acq_time": v.acq_time.astype(str).str.zfill(4),
+        "satellite": v.satellite, "instrument": np.where(v.sensor.isin(["aqua", "terra"]), "MODIS", "VIIRS"),
+        "confidence": v.confidence, "frp": v.frp.round(2), "daynight": v.daynight,
+        "product": v.sensor.map(prod), "harmonized_weight": v.w.round(4),
+    })
+    out["blk"] = [f"{la}_{lo}" for la, lo in zip(np.floor(v.latitude).astype(int), np.floor(v.longitude).astype(int))]
+    d = os.path.join(args.out, "hotspots")
+    os.makedirs(d, exist_ok=True)
+    for old in glob.glob(os.path.join(d, "*.csv.gz")):
+        os.remove(old)
+    index = {}
+    for blk, g in out.groupby("blk"):
+        g = g.drop(columns="blk").sort_values(["acq_date", "acq_time"])
+        with gzip.open(os.path.join(d, f"{blk}.csv.gz"), "wt", compresslevel=9, newline="") as fh:
+            g.to_csv(fh, index=False)
+        index[blk] = {"rows": int(len(g)), "first": g.acq_date.iloc[0], "last": g.acq_date.iloc[-1]}
+    with open(os.path.join(d, "index.json"), "w") as fh:
+        json.dump({"block_deg": 1, "key": "floor(lat)_floor(lon)", "period": "%04d-%02d..%s" % (START[0], START[1], out.acq_date.max()[:7]),
+                   "note": "vegetation-fire hotspots used to build the harmonized record; harmonized_weight = contribution of each "
+                           "hotspot to the VIIRS-equivalent count (0 = not used, e.g. Terra or NOAA-20 outside sensor outages)",
+                   "blocks": index}, fh, separators=(",", ":"))
+    size = sum(os.path.getsize(x) for x in glob.glob(os.path.join(d, "*.csv.gz")))
+    log(f"hotspots/: {len(index)} blocks, {len(out):,} hotspots, {size/1e6:.1f} MB gzipped")
+
+
 # ----------------------------------------------------------------------------- main
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = p.add_subparsers(dest="cmd", required=True)
     d = sp.add_parser("download"); d.add_argument("--data", default="data/raw"); d.add_argument("--retries", type=int, default=6)
     b = sp.add_parser("build"); b.add_argument("--data", default="data/raw"); b.add_argument("--out", default="data/app")
+    e = sp.add_parser("export-hotspots"); e.add_argument("--data", default="data/raw"); e.add_argument("--out", default="data/app")
     v = sp.add_parser("validate"); v.add_argument("--data", default="data/raw"); v.add_argument("--out", default="data/app")
     f = sp.add_parser("fetch-current"); f.add_argument("--out", default="data/app"); f.add_argument("--map-key")
     f.add_argument("--start", default="2026-01-01"); f.add_argument("--end"); f.add_argument("--cache", default="data/api_cache")
     f.add_argument("--offline", action="store_true", help="build current.json from cached windows only, no API calls")
     a = p.parse_args()
-    {"download": cmd_download, "build": cmd_build, "validate": cmd_validate, "fetch-current": cmd_fetch_current}[a.cmd](a)
+    {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current}[a.cmd](a)
 
 
 if __name__ == "__main__":

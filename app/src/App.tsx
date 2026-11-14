@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import * as H from "@core";
 import MapView from "./MapView";
-import Calendar from "./Calendar";
+import Calendar, { type CalMode } from "./Calendar";
 import YearChart from "./YearChart";
-import { areaKm2, bboxOfCells, download, loadData, regionOfCell, sourceOf, type AppData } from "./data";
+import { rangeAnalytics } from "./analytics";
+import { downloadReport } from "./report";
+import {
+  areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
+  HOTSPOT_HEADER, loadData, regionOfCell, sourceOf, type AppData,
+} from "./data";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang } from "./i18n";
 
 type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom";
@@ -12,6 +17,7 @@ const CLASS_STYLE: Record<string, { icon: string; color: string }> = {
   high: { icon: "↑", color: "#c9461a" }, extreme: { icon: "▲", color: "#d03b3b" },
 };
 const REPO = "https://github.com/NeryC/tata-rekavo";
+const MAX_ROWS = 1_500_000;
 
 export default function App() {
   const [lang, setLang] = useState<Lang>(initialLang);
@@ -21,13 +27,28 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zoneKind, setZoneKind] = useState<ZoneKind>("paraguay");
   const [polygon, setPolygon] = useState<number[][] | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
+  const [coordsOpen, setCoordsOpen] = useState(false);
+  const [coordsForm, setCoordsForm] = useState({ lat: "-22.35", lon: "-60.03", r: "25" });
+  const [coordsError, setCoordsError] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [month, setMonth] = useState<number>(-1);
+  const [range, setRange] = useState<[number, number]>([0, 0]);
   const [naive, setNaive] = useState(false);
   const [newOnly, setNewOnly] = useState(false);
+  const [calMode, setCalMode] = useState<CalMode>("ratio");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+  const [estimate, setEstimate] = useState<number | null>(null);
 
   useEffect(() => {
-    loadData().then((d) => { setData(d); setMonth(d.grid.nMonths - 1); }).catch((e) => setError(String(e)));
+    loadData().then((d) => {
+      setData(d);
+      const last = d.grid.nMonths - 1;
+      setMonth(last);
+      const { year } = H.monthOf(d.grid.meta, last);
+      setRange([Math.max(0, H.indexOf(d.grid.meta, year, 1)), last]);
+    }).catch((e) => setError(String(e)));
   }, []);
   useEffect(() => { document.documentElement.lang = lang; document.title = `Tata Rekavo · ${t.title}`; saveLang(lang); }, [lang, t]);
 
@@ -60,6 +81,20 @@ export default function App() {
   }, [grid, month]);
   const monthHotspots = useMemo(() => (data ? data.hotspots.filter((h) => h.m === month) : []), [data, month]);
   const zoneMonthHotspots = useMemo(() => monthHotspots.filter((h) => zoneSet.has(h.cell)), [monthHotspots, zoneSet]);
+  const analytics = useMemo(() => (grid && series ? rangeAnalytics(grid, series, coverage, range[0], range[1]) : null), [grid, series, coverage, range]);
+
+  // estimated size of the hotspot download for this area and range
+  useEffect(() => {
+    if (!grid || !data) return;
+    let alive = true;
+    hotspotIndex().then(() => { // warm the block index while the user decides
+      if (!alive) return;
+      const hist = estimateHistoricalRows(grid, zoneCells, range[0], range[1]);
+      const recent = data.hotspots.filter((h) => h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).length;
+      setEstimate(Math.round(hist + recent));
+    });
+    return () => { alive = false; };
+  }, [grid, data, zoneCells, zoneSet, range]);
 
   const header = (
     <header className="top">
@@ -82,25 +117,76 @@ export default function App() {
   );
 
   if (error) return <I18nContext.Provider value={i18n}><div className="app">{header}<div className="splash">{t.loadError} {error}</div></div></I18nContext.Provider>;
-  if (!data || !grid || !series || month < 0) return <I18nContext.Provider value={i18n}><div className="app">{header}<div className="splash">{t.loading}</div></div></I18nContext.Provider>;
+  if (!data || !grid || !series || !analytics || month < 0) return <I18nContext.Provider value={i18n}><div className="app">{header}<div className="splash">{t.loading}</div></div></I18nContext.Provider>;
 
   const meta = grid.meta;
+  const last = grid.nMonths - 1;
   const cov = coverage(month);
   const v = H.verdict(grid, series.harmonized, month, cov);
   const cls = CLASS_STYLE[v.class.id];
+  const ml = (m: number) => { const o = H.monthOf(meta, m); return i18n.monthLabel(o.year, o.month); };
   const { year: selYear, month: selMonth } = H.monthOf(meta, month);
-  const monthLabel = i18n.monthLabel(selYear, selMonth);
+  const monthLabel = ml(month);
   const monthLong = i18n.monthLong(selMonth);
-  const months = Array.from({ length: grid.nMonths }, (_, m) => m).reverse();
+  const monthsDesc = Array.from({ length: grid.nMonths }, (_, m) => m).reverse();
   const val = meta.validation?.leave_one_year_out;
-  const lastPartial = coverage(grid.nMonths - 1) < 1;
-  const zoneHotspots = data.hotspots.filter((h) => zoneSet.has(h.cell));
+  const lastPartial = coverage(last) < 1;
   const small = zoneCells.length < 40;
   const nNew = zoneMonthHotspots.filter((h) => h.fresh).length;
   const pctNew = zoneMonthHotspots.length ? (100 * nNew) / zoneMonthHotspots.length : 0;
-  const lastYear = H.monthOf(meta, grid.nMonths - 1).year;
+  const zoneLabel = zoneKind === "custom" && coords
+    ? t.zoneCoords(coords.lat.toFixed(2), coords.lon.toFixed(2), String(coords.r)) : t.zoneIn[zoneKind];
+  const rangeLabel = `${ml(range[0])} – ${ml(range[1])}`;
+  const rangeNew = data.hotspots.filter((h) => h.fresh && h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).length;
+  const lastYear = H.monthOf(meta, last).year;
+  const seasonYear = H.indexOf(meta, lastYear, 10) <= last ? lastYear : lastYear - 1;
+  const presets: Record<string, [number, number]> = {
+    year: [Math.max(0, H.indexOf(meta, lastYear, 1)), last],
+    last12: [Math.max(0, last - 11), last],
+    season: [H.indexOf(meta, seasonYear, 7), H.indexOf(meta, seasonYear, 10)],
+    all: [0, last],
+  };
+  const tooMany = (estimate ?? 0) > MAX_ROWS;
+  const tag = (m: number) => { const o = H.monthOf(meta, m); return `${o.year}-${String(o.month).padStart(2, "0")}`; };
+  const fileTag = `${zoneKind}_${tag(range[0])}_${tag(range[1])}`;
+  const analyticsLines = [
+    t.rangeVsTypical(i18n.ratio(analytics.ratio), num(analytics.typical)),
+    ...(analytics.peak.m >= 0 ? [t.rangePeak(ml(analytics.peak.m), num(analytics.peak.v))] : []),
+    t.rangeMonths(analytics.above, analytics.below, analytics.months),
+    ...(rangeNew ? [t.rangeNew(num(rangeNew))] : []),
+  ];
 
-  const pickZone = (k: ZoneKind) => { setDrawing(false); setZoneKind(k); if (k !== "custom") setPolygon(null); };
+  const pickZone = (k: ZoneKind) => { setDrawing(false); setCoordsOpen(false); setZoneKind(k); if (k !== "custom") { setPolygon(null); setCoords(null); } };
+  const applyCoords = () => {
+    const parse = (s: string) => parseFloat(s.replace(",", ".").replace("−", "-"));
+    const lat = parse(coordsForm.lat), lon = parse(coordsForm.lon), r = parse(coordsForm.r);
+    const ok = lat >= -27.7 && lat <= -19.1 && lon >= -62.8 && lon <= -54.1 && r >= 5 && r <= 300;
+    setCoordsError(!ok);
+    if (!ok) return;
+    setDrawing(false);
+    setCoords({ lat, lon, r });
+    setPolygon(circleRing(lat, lon, r));
+    setZoneKind("custom");
+  };
+  const setRangeSafe = (a: number, b: number) => setRange(a <= b ? [a, b] : [b, a]);
+
+  const downloadHotspots = async () => {
+    setDlError(null);
+    try {
+      const hist = range[0] < meta.months.count
+        ? await historicalHotspotRows(meta, zoneSet, range[0], Math.min(range[1], meta.months.count - 1), (a, b) => setBusy(t.dlPreparing(a, b)))
+        : [];
+      const recent = data.hotspots.filter((h) => h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).map((h) => h.csv);
+      const rows = [...hist, ...recent];
+      const parts: string[] = [HOTSPOT_HEADER + "\n"];
+      for (let k = 0; k < rows.length; k += 50000) parts.push(rows.slice(k, k + 50000).join("\n") + "\n");
+      downloadParts(`tata-rekavo_hotspots_${fileTag}.csv`, parts);
+    } catch (e) {
+      setDlError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <I18nContext.Provider value={i18n}>
@@ -112,10 +198,22 @@ export default function App() {
               <h2>{t.step1}</h2>
               <div className="seg" role="group" aria-label={t.step1}>
                 {(["paraguay", "chaco", "oriental"] as const).map((k) => (
-                  <button key={k} className={zoneKind === k && !drawing ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
+                  <button key={k} className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
                 ))}
-                <button className={drawing || zoneKind === "custom" ? "on" : ""} onClick={() => setDrawing(true)}>{t.zones.draw}</button>
+                <button className={drawing || (zoneKind === "custom" && !coords && !coordsOpen) ? "on" : ""}
+                  onClick={() => { setCoordsOpen(false); setDrawing(true); }}>{t.zones.draw}</button>
+                <button className={coordsOpen || (zoneKind === "custom" && coords) ? "on" : ""}
+                  onClick={() => { setDrawing(false); setCoordsOpen(!coordsOpen); }}>{t.coords}</button>
               </div>
+              {coordsOpen && (<>
+                <div className="coords">
+                  <label>{t.coordsLat}<input inputMode="decimal" value={coordsForm.lat} onChange={(e) => setCoordsForm({ ...coordsForm, lat: e.target.value })} /></label>
+                  <label>{t.coordsLon}<input inputMode="decimal" value={coordsForm.lon} onChange={(e) => setCoordsForm({ ...coordsForm, lon: e.target.value })} /></label>
+                  <label>{t.coordsRadius}<input inputMode="decimal" value={coordsForm.r} onChange={(e) => setCoordsForm({ ...coordsForm, r: e.target.value })} /></label>
+                  <button onClick={applyCoords}>{t.coordsApply}</button>
+                </div>
+                <p className={coordsError ? "dl-error" : "note"}>{coordsError ? t.coordsInvalid : t.coordsHelp}</p>
+              </>)}
               <p className="meta">{t.cellsArea(num(zoneCells.length), num(areaKm2(meta, zoneCells)))}
                 {small && zoneCells.length > 0 && <span className="warn">{t.smallArea}</span>}
                 {zoneCells.length === 0 && <span className="warn">{t.noCells}</span>}
@@ -127,17 +225,14 @@ export default function App() {
               <div className="month-row">
                 <button aria-label={t.prev} onClick={() => setMonth(Math.max(0, month - 1))} disabled={month === 0}>‹</button>
                 <select value={month} onChange={(e) => setMonth(+e.target.value)} aria-label={t.monthAria}>
-                  {months.map((m) => {
-                    const { year, month: mo } = H.monthOf(meta, m);
-                    return <option key={m} value={m}>{i18n.monthLabel(year, mo)}{coverage(m) < 1 ? t.inProgress : ""}</option>;
-                  })}
+                  {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}{coverage(m) < 1 ? t.inProgress : ""}</option>)}
                 </select>
-                <button aria-label={t.next} onClick={() => setMonth(Math.min(grid.nMonths - 1, month + 1))} disabled={month === grid.nMonths - 1}>›</button>
+                <button aria-label={t.next} onClick={() => setMonth(Math.min(last, month + 1))} disabled={month === last}>›</button>
               </div>
             </section>
 
             <section className="verdict" style={{ borderColor: cls.color }} aria-live="polite">
-              <div className="v-when">{t.verdictWhen(monthLabel, t.zoneIn[zoneKind], v.partial ? Math.round(cov * 100) : null)}</div>
+              <div className="v-when">{t.verdictWhen(monthLabel, zoneLabel, v.partial ? Math.round(cov * 100) : null)}</div>
               <div className="v-main">
                 <span className="v-badge" style={{ background: cls.color }}>{cls.icon} {t.classes[v.class.id]}</span>
                 <span className="v-ratio">{Number.isFinite(v.ratio) ? `×${i18n.ratio(v.ratio)}` : "—"}<small>{t.ofUsual}</small></span>
@@ -165,8 +260,38 @@ export default function App() {
             </section>
 
             <section>
-              <h2>{t.calendarTitle(t.zoneIn[zoneKind])}</h2>
-              <Calendar grid={grid} series={series.harmonized} coverage={coverage} selected={month} onSelect={setMonth} />
+              <h2>{t.step3}</h2>
+              <div className="range-row">
+                <span>{t.rangeFrom}</span>
+                <select value={range[0]} onChange={(e) => setRangeSafe(+e.target.value, range[1])} aria-label={t.rangeFrom}>
+                  {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}</option>)}
+                </select>
+                <span>{t.rangeTo}</span>
+                <select value={range[1]} onChange={(e) => setRangeSafe(range[0], +e.target.value)} aria-label={t.rangeTo}>
+                  {monthsDesc.map((m) => <option key={m} value={m}>{ml(m)}</option>)}
+                </select>
+              </div>
+              <div className="chips">
+                {Object.entries(presets).map(([k, r]) => <button key={k} onClick={() => setRange(r)}>{t.presets[k]}</button>)}
+              </div>
+            </section>
+
+            <section className="analytics" aria-live="polite">
+              <h3>{t.rangeTitle(ml(range[0]), ml(range[1]))} · {zoneLabel}</h3>
+              <div className="big">{t.rangeTotal(num(analytics.total), analytics.err > 0 ? ` ±${num(analytics.err)}` : "")}</div>
+              <ul>{analyticsLines.map((l) => <li key={l}>{l}</li>)}</ul>
+              {analytics.partial && <span className="tag">{t.rangePartial}</span>}
+            </section>
+
+            <section>
+              <div className="h2row">
+                <h2>{t.calendarTitle(zoneLabel)}</h2>
+                <div className="seg small" role="group">
+                  <button className={calMode === "ratio" ? "on" : ""} onClick={() => setCalMode("ratio")}>{t.calModeRatio}</button>
+                  <button className={calMode === "count" ? "on" : ""} onClick={() => setCalMode("count")}>{t.calModeCount}</button>
+                </div>
+              </div>
+              <Calendar grid={grid} series={series.harmonized} coverage={coverage} selected={month} onSelect={setMonth} mode={calMode} range={range} />
             </section>
 
             <section>
@@ -182,14 +307,20 @@ export default function App() {
             </section>
 
             <section>
-              <h2>{t.download}</h2>
+              <h2>{t.download} · {rangeLabel}</h2>
               <div className="downloads">
-                <button onClick={() => download(`tata-rekavo_${zoneKind}_monthly.csv`, H.seriesToCSV(grid, series))}>{t.dlSeries}</button>
-                <button disabled={!zoneHotspots.length}
-                  onClick={() => download(`tata-rekavo_${zoneKind}_hotspots_${data.current?.from ?? ""}_${data.current?.to ?? ""}.csv`,
-                    [data.hotspotsHeader, ...zoneHotspots.map((h) => h.raw)].join("\n") + "\n")}>
-                  {t.dlHotspots(num(zoneHotspots.length), String(lastYear))}
+                <button onClick={() => {
+                  const lines = H.seriesToCSV(grid, series).trimEnd().split("\n");
+                  download(`tata-rekavo_monthly_${fileTag}.csv`, [lines[0], ...lines.slice(range[0] + 1, range[1] + 2)].join("\n") + "\n");
+                }}>{t.dlSeriesRange(ml(range[0]), ml(range[1]))}</button>
+                <button disabled={!!busy || tooMany || !zoneCells.length} onClick={downloadHotspots}>
+                  {busy ?? t.dlHotspotsRange(ml(range[0]), ml(range[1]))}
+                  {!busy && estimate !== null && !tooMany && <span className="dl-hint">{t.dlHotspotsEstimate(num(estimate))}</span>}
                 </button>
+                {tooMany && <p className="dl-error">{t.dlTooMany(num(estimate ?? 0))}</p>}
+                <button onClick={() => downloadReport({ grid, series, coverage, i18n, zoneLabel, range, rangeLabel, mode: calMode, analytics,
+                  lines: analyticsLines }, `tata-rekavo_report_${fileTag}.png`)}>{t.dlReport}</button>
+                {dlError && <p className="dl-error">{t.dlFailed} {dlError}</p>}
               </div>
             </section>
 
@@ -202,7 +333,7 @@ export default function App() {
 
           <MapView grid={grid} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox}
             polygon={zoneKind === "custom" ? polygon : null} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
-            onDrawn={(ring) => { setPolygon(ring); setZoneKind("custom"); setDrawing(false); }}
+            onDrawn={(ring) => { setPolygon(ring); setCoords(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)} />
         </main>
       </div>

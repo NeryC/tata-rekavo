@@ -6,9 +6,12 @@ export interface Hotspot {
   lon: number; lat: number; date: string; m: number; frp: number; cell: number;
   /** no hotspot from any sensor within ~1 km (same or neighbouring 0.01-degree cell), Jul 2002 - Dec 2025 */
   fresh: boolean;
-  raw: string;
+  /** row in the unified hotspot CSV format (HOTSPOT_HEADER) */
+  csv: string;
 }
-export interface AppData { grid: Grid; current: CurrentMeta | null; hotspotsHeader: string; hotspots: Hotspot[]; historyPeriod: string }
+
+export const HOTSPOT_HEADER = "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp,daynight,product,harmonized_weight,new_place";
+export interface AppData { grid: Grid; current: CurrentMeta | null; hotspots: Hotspot[]; historyPeriod: string }
 
 const url = (f: string) => `${import.meta.env.BASE_URL}${f}`;
 
@@ -43,24 +46,25 @@ export async function loadData(): Promise<AppData> {
   ]);
   const grid = H.decodeGrid(gridJson, currentJson);
   const isFresh = burnJson ? makeFreshTest(burnJson) : () => false;
-  let hotspotsHeader = "";
   let hotspots: Hotspot[] = [];
   try {
     const txt = await fetch(url("current_hotspots.csv")).then((r) => (r.ok ? r.text() : ""));
     const lines = txt.trim().split("\n");
-    hotspotsHeader = lines[0] + ",new_place";
     const cols = lines[0].split(",");
-    const iLat = cols.indexOf("latitude"), iLon = cols.indexOf("longitude"), iDate = cols.indexOf("acq_date"), iFrp = cols.indexOf("frp");
+    const col = (n: string) => cols.indexOf(n);
+    const iLat = col("latitude"), iLon = col("longitude"), iDate = col("acq_date"), iFrp = col("frp");
+    const keep = ["acq_time", "satellite", "instrument", "confidence", "frp", "daynight", "product"].map(col);
     hotspots = lines.slice(1).map((line) => {
       const f = line.split(",");
       const lat = +f[iLat], lon = +f[iLon], date = f[iDate];
       const [y, mo] = date.split("-").map(Number);
       const fresh = isFresh(lon, lat);
-      return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh,
-               raw: `${line},${fresh ? 1 : 0}` };
+      const [time, ...rest] = keep.map((k) => (k >= 0 ? f[k] ?? "" : ""));
+      const csv = [f[iLat], f[iLon], date, time.padStart(4, "0"), ...rest, "1", fresh ? "1" : "0"].join(",");
+      return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv };
     });
   } catch { /* hotspots are optional */ }
-  return { grid, current: currentJson ? currentJson.meta : null, hotspotsHeader, hotspots, historyPeriod: burnJson?.period ?? "" };
+  return { grid, current: currentJson ? currentJson.meta : null, hotspots, historyPeriod: burnJson?.period ?? "" };
 }
 
 function interp(x: number, xs: number[], ys: number[]) {
@@ -122,4 +126,91 @@ export function download(name: string, text: string) {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------------------------------------------------------------- historical hotspots (1-degree gzip blocks)
+interface HotspotIndex { blocks: Record<string, { rows: number; first: string; last: string }> }
+let indexPromise: Promise<HotspotIndex | null> | null = null;
+export function hotspotIndex() {
+  indexPromise ??= fetch(url("hotspots/index.json")).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  return indexPromise;
+}
+
+const blockOfCell = (meta: GridMeta, idx: number) => {
+  const [lon, lat] = H.cellCenter(meta, idx);
+  return `${Math.floor(lat)}_${Math.floor(lon)}`;
+};
+
+/** Archived hotspots a search would return: MODIS (Terra+Aqua) + S-NPP counts per cell-month from the grid,
+ *  plus NOAA-20 (about as many as S-NPP) from April 2018. */
+export function estimateHistoricalRows(grid: Grid, zone: number[], from: number, to: number) {
+  const meta = grid.meta;
+  const end = Math.min(to, meta.months.count - 1), n20 = H.indexOf(meta, 2018, 4);
+  let rows = 0;
+  for (const idx of zone) {
+    const c = grid.cells.get(idx);
+    if (!c) continue;
+    for (let k = 0; k < c.m.length; k++) {
+      const m = c.m[k];
+      if (m < from || m > end) continue;
+      rows += c.modis[k] + c.viirs[k] * (m >= n20 ? 2 : 1);
+    }
+  }
+  return rows;
+}
+
+async function gunzipText(res: Response) {
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf[0] === 0x1f && buf[1] === 0x8b) { // still gzipped (served as a plain file)
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).text();
+  }
+  return new TextDecoder().decode(buf); // the server already decompressed it
+}
+
+/** Archived hotspots (Jul 2002 - Dec 2025) inside the zone cells and month range, as unified CSV rows. */
+export async function historicalHotspotRows(meta: GridMeta, zone: Set<number>, from: number, to: number,
+  onProgress: (done: number, total: number) => void): Promise<string[]> {
+  const index = await hotspotIndex();
+  if (!index) return [];
+  const blocks = [...new Set([...zone].map((i) => blockOfCell(meta, i)))].filter((b) => index.blocks[b]);
+  const out: string[] = [];
+  let done = 0;
+  onProgress(0, blocks.length);
+  for (const b of blocks) {
+    const res = await fetch(url(`hotspots/${b}.csv.gz`));
+    if (!res.ok) throw new Error(`${b}: HTTP ${res.status}`);
+    const lines = (await gunzipText(res)).split("\n");
+    for (let k = 1; k < lines.length; k++) {
+      const line = lines[k];
+      if (!line) continue;
+      const c1 = line.indexOf(","), c2 = line.indexOf(",", c1 + 1);
+      const lat = +line.slice(0, c1), lon = +line.slice(c1 + 1, c2);
+      const y = +line.slice(c2 + 1, c2 + 5), mo = +line.slice(c2 + 6, c2 + 8);
+      const m = H.indexOf(meta, y, mo);
+      if (m < from || m > to || !zone.has(H.cellAt(meta, lon, lat))) continue;
+      out.push(line + ",");
+    }
+    onProgress(++done, blocks.length);
+  }
+  return out;
+}
+
+/** Circle polygon (lon/lat ring) around a point, radius in km. */
+export function circleRing(lat: number, lon: number, km: number, n = 48): number[][] {
+  const ring: number[][] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    ring.push([lon + (km / (111.32 * Math.cos((lat * Math.PI) / 180))) * Math.cos(a), lat + (km / 111.32) * Math.sin(a)]);
+  }
+  return ring;
+}
+
+export function downloadParts(name: string, parts: string[]) {
+  const blob = new Blob(parts, { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
