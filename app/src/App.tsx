@@ -5,6 +5,7 @@ import Calendar, { type CalMode } from "./Calendar";
 import YearChart from "./YearChart";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
+import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
   HOTSPOT_HEADER, loadData, regionOfCell, sourceOf, type AppData,
@@ -116,6 +117,15 @@ export default function App() {
   const changed = !!data && (zoneKind !== "paraguay" || drawing || coordsOpen || month !== lastIdx
     || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || mapMoved);
 
+  const generated = data?.current?.generated;
+  const stale = !!generated && isStale(generated, new Date());
+  const updatedLine = generated ? (
+    <p className={stale ? "updated stale" : "updated"}>
+      {t.lastUpdated(formatUpdated(generated, lang))}
+      {stale && <> · {t.staleData}</>}
+    </p>
+  ) : null;
+
   const header = (
     <header className="top">
       <div className="brand">
@@ -123,6 +133,7 @@ export default function App() {
         <div>
           <h1>{t.title}</h1>
           <p>{t.subtitle}</p>
+          {updatedLine}
         </div>
       </div>
       <nav>
@@ -392,6 +403,7 @@ export default function App() {
               <details>
                 <summary>{t.aboutData}</summary>
                 <p>{t.footData(meta.months.last, data.current?.to ?? null)}</p>
+                {updatedLine}
                 {val && <p>{t.footValidation(val.country?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
               </details>
               <p>{t.footHotspot}</p>

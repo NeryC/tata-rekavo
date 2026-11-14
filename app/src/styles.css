@@ -42,6 +42,10 @@ p { margin: 0; }
 .logo { color: #f9b36e; font-size: 30px; line-height: 1; }
 .top h1 { margin: 0; font-size: 22px; font-weight: 750; font-stretch: 112%; letter-spacing: -0.01em; line-height: 1.15; }
 .top p { margin-top: 3px; font-size: 14px; color: #b9c4bb; }
+.top .updated { margin-top: 2px; font-size: 13px; color: #b9c4bb; }
+.top .updated.stale { color: #f9b36e; }
+.about .updated { margin-top: 8px; color: var(--muted); }
+.about .updated.stale { color: var(--warn); font-weight: 600; }
 .top nav { display: flex; align-items: center; gap: 18px; font-size: 14px; flex-shrink: 0; }
 .top nav a { color: #f2f4f1; text-underline-offset: 3px; }
 .reset-all { display: inline-flex; gap: 6px; align-items: center; min-height: 36px; padding: 0 12px; background: transparent; color: #f2f4f1; border: 1px solid #6b776e; border-radius: 8px; font-size: 14px; }

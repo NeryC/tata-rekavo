@@ -14,6 +14,7 @@ export interface GridMeta {
 }
 export interface CurrentMeta {
   from: string; to: string;
+  generated: string; source?: string;
   month_coverage: Record<string, number>;
   month_products: Record<string, Record<string, number>>;
 }
