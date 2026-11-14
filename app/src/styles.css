@@ -265,3 +265,16 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .panel > .sec-area { padding: 16px 0 14px; }
 .panel > .sec-month { padding: 14px 0 0; border-bottom: 0; }
 .panel > section.verdict { margin-top: 16px; }
+
+/* "How reliable is this?" panel, inside the coloured verdict card: body sits on a light card */
+.trust { margin-top: 10px; }
+.trust-body { margin-top: 8px; padding: 12px 14px; border-radius: 8px; background: var(--surface); color: var(--ink); }
+.verdict .trust-body p { color: var(--ink-2); opacity: 1; margin-top: 8px; max-width: 62ch; }
+.verdict .trust-body p:first-child { margin-top: 0; }
+.trust-scroll { margin-top: 10px; overflow-x: auto; }
+.trust table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.trust th, .trust td { padding: 6px 8px; border-bottom: 1px solid var(--rule); text-align: right; font-variant-numeric: tabular-nums; }
+.trust thead th { font-weight: 600; color: var(--ink-2); vertical-align: bottom; }
+.trust th:first-child, .trust td:first-child { text-align: left; }
+.trust tbody th { font-weight: 600; color: var(--ink); }
+.trust img { display: block; max-width: 100%; height: auto; margin-top: 10px; border-radius: 4px; }

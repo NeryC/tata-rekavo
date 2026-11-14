@@ -13,7 +13,7 @@ export interface Hotspot {
 export const HOTSPOT_HEADER = "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp,daynight,product,harmonized_weight,new_place";
 export interface AppData { grid: Grid; current: CurrentMeta | null; hotspots: Hotspot[]; historyPeriod: string }
 
-const url = (f: string) => `${import.meta.env.BASE_URL}${f}`;
+export const url = (f: string) => `${import.meta.env.BASE_URL}${f}`;
 
 function b64ToBytes(b64: string) {
   const bin = atob(b64);

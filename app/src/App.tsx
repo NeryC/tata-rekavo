@@ -3,6 +3,7 @@ import * as H from "@core";
 import MapView from "./MapView";
 import Calendar, { type CalMode } from "./Calendar";
 import YearChart from "./YearChart";
+import ValidationPanel from "./ValidationPanel";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
@@ -376,6 +377,7 @@ export default function App() {
                 <summary>{t.whatIsHotspot}</summary>
                 <p>{t.hotspotDef}</p>
               </details>
+              <ValidationPanel meta={meta} />
             </section>
 
             <section className="newplaces">
