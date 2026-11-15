@@ -165,7 +165,11 @@ export default function MapView(p: Props) {
         });
         m.on("mouseleave", "cells", () => popup.remove());
         // a hotspot: when, with which sensor and from which product it was detected (hover with a mouse, tap on touch)
-        const hotspotPopup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 8, className: "hs-popup" });
+        // closed by its button or a click away from the points: closeOnClick would also close it on the click that opens it
+        const hotspotPopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 8, className: "hs-popup" });
+        m.on("click", (e) => {
+          if (!m.queryRenderedFeatures(e.point, { layers: ["hotspots", "hotspots-new"] }).length) hotspotPopup.remove();
+        });
         const showHotspot = (e: maplibregl.MapLayerMouseEvent) => {
           if (props.current.drawing) return;
           const f = e.features?.[0];
