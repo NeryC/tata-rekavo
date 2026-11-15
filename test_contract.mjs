@@ -25,12 +25,17 @@ console.log(`     area ${countryArea}, ${regionAreas.length} regions, grid ${gri
 // 1. whole country (all cells) must equal the pipeline's country series, month by month
 const all = H.zoneSeries(grid, [...grid.cells.keys()]);
 const py = csv.filter((r) => r[0] === countryArea);
+// grid.json stores each cell-month rounded to 0.1, so the sum over the cells of a month may drift by up to 0.05 per cell
+// from the unrounded series of series_regions.csv (visible only when the monthly totals are small, e.g. Uruguay)
+const cellsInMonth = new Map();
+for (const c of grid.cells.values()) for (const m of c.m) cellsInMonth.set(m, (cellsInMonth.get(m) ?? 0) + 1);
 let maxDiff = 0;
 for (const r of py) {
   const m = H.indexOf(grid.meta, +r[1], +r[2]);
-  maxDiff = Math.max(maxDiff, Math.abs(all.harmonized[m] - +r[3]) / Math.max(1, +r[3]));
+  const rounding = 0.05 * ((cellsInMonth.get(m) ?? 0) + 1);
+  maxDiff = Math.max(maxDiff, Math.max(0, Math.abs(all.harmonized[m] - +r[3]) - rounding) / Math.max(1, +r[3]));
 }
-check(maxDiff < 0.002, `country series matches pipeline (max rel diff ${maxDiff.toExponential(2)})`);
+check(maxDiff < 0.002, `country series matches pipeline (max rel diff ${maxDiff.toExponential(2)}, beyond the 0.1 cell rounding)`);
 
 // 2. polygon selection: a box over the central Chaco (Paraguay) or, for other countries, a box of 10x10 cells
 // centred on the grid cell with the most hotspots
