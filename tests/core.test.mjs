@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  classify, decodeGrid, departmentRanking, indexOf, monthOf, validationSummary, verdict,
+  classify, currentCumulative, decodeGrid, departmentRanking, indexOf, monthOf, seasonStatus, validationSummary, verdict,
 } from "../harmonized.js";
 
 const grid = JSON.parse(
@@ -173,4 +173,102 @@ test("departmentRanking ranks months with no history as lowSignal, not solid", (
   assert.deepEqual(r.map((x) => x.id), ["b", "a"]); // by value desc: 50 then 10
   const rr = departmentRanking(g, [dep("a", 1), dep("b", 2)], 3);
   assert.ok(rr.every((x) => x.lowSignal));
+});
+
+// ---- season status ----
+const season = JSON.parse(
+  readFileSync(new URL("../data/app/season.json", import.meta.url), "utf8"),
+);
+const synthClim = () => {
+  const p50 = Float64Array.from({ length: 365 }, (_, i) => (i + 1) * 10);
+  return { p10: p50.map((v) => v * 0.5), p50, p90: p50.map((v) => v * 2) };
+};
+
+test("currentCumulative counts hotspots by UTC date into a cumulative curve", () => {
+  const c = currentCumulative([{ date: "2025-01-01" }, { date: "2025-01-01" }, { date: "2025-01-03" }], 2025);
+  assert.equal(c.length, 365);
+  assert.deepEqual([c[0], c[1], c[2], c[364]], [2, 2, 3, 3]);
+});
+
+test("currentCumulative ignores other years", () => {
+  const c = currentCumulative([{ date: "2024-06-01" }, { date: "2026-01-01" }, { date: "2025-06-01" }], 2025);
+  assert.equal(c[364], 1);
+});
+
+test("currentCumulative merges Feb 29 into DOY 59 and keeps Mar 1 at DOY 60 (leap year)", () => {
+  const c = currentCumulative([{ date: "2024-02-28" }, { date: "2024-02-29" }, { date: "2024-03-01" }, { date: "2024-12-31" }], 2024);
+  assert.equal(c[57], 0);
+  assert.equal(c[58], 2); // Feb 28 + Feb 29
+  assert.equal(c[59], 3); // Mar 1 is DOY 60
+  assert.equal(c[364], 4); // Dec 31 is DOY 365, not 366
+});
+
+test("currentCumulative in a common year: Mar 1 is DOY 60", () => {
+  const c = currentCumulative([{ date: "2025-03-01" }], 2025);
+  assert.equal(c[58], 0);
+  assert.equal(c[59], 1);
+});
+
+test("seasonStatus: current equal to median is ratio 1, within, lead 0", () => {
+  const clim = synthClim();
+  const s = seasonStatus(clim.p50, clim, 100);
+  assert.deepEqual(s, { ratio: 1, band: "within", leadDays: 0, early: false });
+});
+
+test("seasonStatus: median shifted 10 days earlier is 10 days ahead (positive = early)", () => {
+  const clim = synthClim();
+  const cum = new Float64Array(365);
+  for (let i = 0; i < 365; i++) cum[i] = clim.p50[Math.min(364, i + 10)];
+  assert.equal(seasonStatus(cum, clim, 100).leadDays, 10);
+  const late = new Float64Array(365);
+  for (let i = 0; i < 365; i++) late[i] = clim.p50[Math.max(0, i - 10)];
+  assert.equal(seasonStatus(late, clim, 100).leadDays, -10);
+});
+
+test("seasonStatus: zero cumulative is ratio 0, below, no division by zero", () => {
+  const clim = synthClim();
+  const s = seasonStatus(new Float64Array(365), clim, 100);
+  assert.equal(s.ratio, 0);
+  assert.equal(s.band, "below");
+  assert.equal(s.leadDays, null);
+  const z = { p10: new Float64Array(365), p50: new Float64Array(365), p90: new Float64Array(365) };
+  assert.equal(seasonStatus(new Float64Array(365), z, 100).ratio, 0);
+});
+
+test("seasonStatus: p50 zero with cum > 0 is Infinity ratio", () => {
+  const z = { p10: new Float64Array(365), p50: new Float64Array(365), p90: new Float64Array(365) };
+  const cum = new Float64Array(365).fill(5);
+  assert.equal(seasonStatus(cum, z, 100).ratio, Infinity);
+});
+
+test("seasonStatus: bands below p10 and above p90", () => {
+  const clim = synthClim();
+  const at = (v) => new Float64Array(365).fill(v);
+  assert.equal(seasonStatus(at(clim.p10[99] - 1), clim, 100).band, "below");
+  assert.equal(seasonStatus(at(clim.p10[99]), clim, 100).band, "within");
+  assert.equal(seasonStatus(at(clim.p90[99]), clim, 100).band, "within");
+  assert.equal(seasonStatus(at(clim.p90[99] + 1), clim, 100).band, "above");
+});
+
+test("seasonStatus: p50 never reaching the current cumulative gives leadDays null", () => {
+  const clim = synthClim();
+  const cum = new Float64Array(365).fill(clim.p50[364] + 1);
+  assert.equal(seasonStatus(cum, clim, 200).leadDays, null);
+});
+
+test("seasonStatus: early flag is true before DOY 15 only", () => {
+  const clim = synthClim();
+  assert.equal(seasonStatus(clim.p50, clim, 14).early, true);
+  assert.equal(seasonStatus(clim.p50, clim, 15).early, false);
+});
+
+test("seasonStatus on real data: paraguay doy 200 equal to p50 is ratio 1, within, lead 0", () => {
+  const clim = season.areas.paraguay;
+  assert.equal(clim.p50.length, 365);
+  const cum = Float64Array.from(clim.p50);
+  const s = seasonStatus(cum, clim, 200);
+  assert.equal(s.ratio, 1);
+  assert.equal(s.band, "within");
+  assert.equal(s.leadDays, 0);
+  assert.equal(s.early, false);
 });

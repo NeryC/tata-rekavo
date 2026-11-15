@@ -262,3 +262,61 @@ export function seriesToCSV(grid, s) {
   }
   return lines.join("\n") + "\n";
 }
+
+const SEASON_DAYS = 365;
+const SEASON_EARLY_DOY = 15;
+
+/**
+ * Cumulative hotspot count by day of year for one calendar year.
+ *
+ * `hotspots` need only a `date` ("YYYY-MM-DD", the UTC FIRMS acq_date). Each hotspot counts 1
+ * (observed VIIRS, already S-NPP-equivalent units). Hotspots from other years are ignored.
+ * Day-of-year follows the pipeline rule: DOY 1..365, with Feb 29 merged into Feb 28 (DOY 59),
+ * so Mar 1 is DOY 60 in every year. Returns a Float64Array(365) where index d-1 holds the
+ * count for DOY 1..d (non-decreasing).
+ */
+export function currentCumulative(hotspots, year) {
+  const cum = new Float64Array(SEASON_DAYS);
+  const prefix = `${year}-`;
+  for (const h of hotspots) {
+    const d = h.date;
+    if (typeof d !== "string" || !d.startsWith(prefix)) continue;
+    const doy = Math.round((Date.UTC(year, +d.slice(5, 7) - 1, +d.slice(8, 10)) - Date.UTC(year, 0, 1)) / 86400000) + 1;
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    const idx = (leap && doy >= 60 ? doy - 1 : doy) - 1;
+    if (idx >= 0 && idx < SEASON_DAYS) cum[idx] += 1;
+  }
+  for (let i = 1; i < SEASON_DAYS; i++) cum[i] += cum[i - 1];
+  return cum;
+}
+
+/**
+ * Where this season stands against the historical climatology on a given day.
+ *
+ * `cum` is the current cumulative curve (see currentCumulative); `clim` is one area of
+ * season.json: `{p10, p50, p90}` cumulative curves of length 365; `doy` is 1-based.
+ * Returns:
+ *  - ratio: cum[doy-1] / p50[doy-1]. 0 when cum is 0 (no division by zero); Infinity when
+ *    p50 is 0 but cum > 0.
+ *  - band: "below" if cum < p10, "above" if cum > p90, otherwise "within" (all at doy).
+ *  - leadDays: how many days ahead of the median the season is. Positive = early (the median
+ *    only reaches today's total later), negative = late, 0 = on the median. Computed as
+ *    (first DOY at which p50 >= cum[doy-1]) - doy. Where p50 is flat the earliest such DOY is
+ *    used. null when it is undefined: cum is 0 (nothing to match) or p50 never reaches cum
+ *    during the year.
+ *  - early: doy < 15. Too few days of data to compare; callers should say so instead of
+ *    showing a verdict.
+ */
+export function seasonStatus(cum, clim, doy) {
+  const i = doy - 1;
+  const c = cum[i], p50 = clim.p50[i];
+  const ratio = c === 0 ? 0 : p50 === 0 ? Infinity : c / p50;
+  const band = c < clim.p10[i] ? "below" : c > clim.p90[i] ? "above" : "within";
+  let leadDays = null;
+  if (c > 0) {
+    for (let d = 0; d < SEASON_DAYS; d++) {
+      if (clim.p50[d] >= c) { leadDays = d + 1 - doy; break; }
+    }
+  }
+  return { ratio, band, leadDays, early: doy < SEASON_EARLY_DOY };
+}

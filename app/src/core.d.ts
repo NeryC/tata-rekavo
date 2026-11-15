@@ -50,3 +50,18 @@ export interface ValidationSummary { rows: ValidationRow[]; spearman: number | n
 export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;
 export function calendar(grid: Grid, series: Float64Array): Calendar;
 export function seriesToCSV(grid: Grid, s: Series): string;
+
+export interface SeasonClimatology { p10: ArrayLike<number>; p50: ArrayLike<number>; p90: ArrayLike<number> }
+export interface SeasonStatus {
+  /** cum / p50 at the day; 0 when cum is 0, Infinity when p50 is 0 and cum > 0. */
+  ratio: number;
+  band: "below" | "within" | "above";
+  /** Days ahead of the median (positive = early, negative = late); null if undefined. */
+  leadDays: number | null;
+  /** doy < 15: too early in the year to compare. */
+  early: boolean;
+}
+/** Cumulative hotspots by DOY (1..365, Feb 29 merged into DOY 59) for `year`; hotspots need a "YYYY-MM-DD" `date`. */
+export function currentCumulative(hotspots: { date: string }[], year: number): Float64Array;
+/** Season status at `doy` (1-based) against one area's season.json climatology. */
+export function seasonStatus(cum: ArrayLike<number>, clim: SeasonClimatology, doy: number): SeasonStatus;
