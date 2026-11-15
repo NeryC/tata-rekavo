@@ -26,6 +26,13 @@ function safeZone(timeZone: string): string {
   try { new Intl.DateTimeFormat("en", { timeZone }); return timeZone; } catch { return "America/Asuncion"; }
 }
 
+/** Any instant as "15 nov 2026, 15:02 (GMT-3)" in the country's time zone; the input itself when it is not a date. */
+export function formatInstant(iso: string, lang: "en" | "es", timeZone: string): string {
+  if (Number.isNaN(new Date(iso).getTime())) return iso;
+  const f = formatAcquired(iso.slice(0, 10), new Date(iso).toISOString(), lang, timeZone);
+  return `${f.date}, ${f.time} (${f.zone})`;
+}
+
 /** Local date, time (24 h) and UTC offset ("GMT-3") of a detection in the country's time zone.
  *  Without a known instant only the acquisition date is given (time and zone null). */
 export function formatAcquired(date: string, at: string | null, lang: "en" | "es", timeZone: string):
@@ -119,4 +126,35 @@ export function describeHotspot(h: Provenance & { date: string }, lang: "en" | "
     confidence: c === null ? t.hsUnknown : c.endsWith("%") ? c : t.hsConf[c as "low" | "nominal" | "high"],
     product: h.product ?? t.hsUnknown,
   };
+}
+
+/** URL param `f`: lat and lon rounded to 0.01 degree (~1 km) and the UTC acquisition time as YYYYMMDDHHMM,
+ *  or only YYYYMMDD when the time is unknown */
+export interface HotspotRef { lat: number; lon: number; t: string }
+
+const round2 = (x: number) => Math.round(x * 100) / 100;
+
+/** The reference of a hotspot. The location is rounded so a link never carries a more precise point than
+ *  the ~1 km the satellite pixel already blurs; the exact point stays in the public FIRMS data. */
+export function shareRef(h: { lat: number; lon: number; date: string; at: string | null }): HotspotRef {
+  const t = h.at ? h.at.slice(0, 16).replace(/[-T:]/g, "") : h.date.replace(/-/g, "");
+  return { lat: round2(h.lat), lon: round2(h.lon), t };
+}
+
+/** The acquisition date and instant (null without a time) a reference names; null when it is not a valid date or time. */
+export function refInstant(t: string): { date: string; at: string | null } | null {
+  const m = /^(\d{4})(\d{2})(\d{2})(\d{4})?$/.exec(t);
+  if (!m) return null;
+  const date = `${m[1]}-${m[2]}-${m[3]}`;
+  const at = acquiredAt(date, m[4] ?? "0000");
+  if (!at) return null;
+  return { date, at: m[4] ? at : null };
+}
+
+/** Hotspots of the referenced pass inside its rounded ~1 km cell (one pass can detect several neighbouring pixels). */
+export function findShared<T extends { lat: number; lon: number; date: string; at: string | null }>(hotspots: T[], ref: HotspotRef): T[] {
+  const when = refInstant(ref.t);
+  if (!when) return [];
+  return hotspots.filter((h) => round2(h.lat) === ref.lat && round2(h.lon) === ref.lon
+    && (when.at ? h.at === when.at : !h.at && h.date === when.date));
 }

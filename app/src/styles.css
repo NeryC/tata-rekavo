@@ -434,3 +434,13 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .hs-list thead th { position: sticky; top: 0; background: var(--surface); font-weight: 600; color: var(--ink-2); }
 .hs-list td:last-child { overflow-wrap: anywhere; }
 .hs-popup .maplibregl-popup-content { padding-right: 26px; line-height: 1.45; }
+
+/* a hotspot shared for verification on the ground */
+.panel > section.shared-hotspot { border: 2px solid var(--ink); border-radius: 10px; padding: 12px 14px; margin: 18px 0 0; }
+.shared-hotspot .h2row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.shared-hotspot .vf-warning { margin: 6px 0; }
+.vf-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0; }
+.vf-facts dt { color: var(--ink-2); }
+.vf-facts dd { margin: 0; overflow-wrap: anywhere; }
+.hs-share { margin-top: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--ink); border-radius: 6px; background: var(--surface); font-size: 13px; cursor: pointer; }
+.hs-list button.small { min-height: 32px; padding: 0 8px; font-size: 13px; white-space: nowrap; }

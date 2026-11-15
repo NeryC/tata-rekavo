@@ -10,7 +10,7 @@
 | 2. Fecha y procedencia | Terminada (PR #33) | 103 pruebas y compilación correctas; navegador en español/inglés a 320, 375 y 1440 px con Paraguay (GMT-3) y Bolivia (GMT-4). Ventana emergente del foco comprobada: abre con clic o toque y cierra al tocar fuera. |
 | 3. Área quemada | Pendiente | Confirmar acceso, licencia y piloto antes de integrar. |
 | 4. Caso Cerro Corá | Pendiente | Confirmar fuentes, permisos y datos disponibles. |
-| 5. Compartir para verificación | Pendiente | Depende de metadatos fiables de la etapa 2. |
+| 5. Compartir para verificación | Terminada (rama `feat/compartir-verificacion`) | Enlace `f=lat,lon,hora UTC` con ubicación redondeada a ~1 km; tarjeta para quien lo recibe; 108 pruebas, compilación y navegador a 320 y 1440 px en español e inglés. |
 
 **Copia de trabajo:** rama `feat/contexto-incendios` basada en `origin/main`. Los 15 archivos locales de etapas anteriores coincidían con lo publicado y se guardaron en el respaldo de Git `respaldo de archivos ya publicados`; no había archivos preparados para commit. La configuración `.claude/settings.local.json` se conserva sin modificar.
 
@@ -119,10 +119,10 @@ Actualizar esta tabla al comenzar y terminar cada etapa, con pruebas, PR y bloqu
 
 **Resultado:** compartir una observación con el contexto necesario para que otra persona la revise.
 
-- [ ] Aprovechar el enlace existente para incluir zona, período y, si corresponde, un foco identificable sin exponer coordenadas precisas de ubicaciones sensibles sin revisar su pertinencia.
-- [ ] Presentar fecha, hora y sensor disponibles, fuente, última actualización y texto «detección satelital; no verificada en terreno».
-- [ ] Probar copia y apertura del enlace en ambos idiomas, validación de parámetros, datos ausentes y compatibilidad con enlaces anteriores.
-- [ ] No añadir cuentas, fotos, foros, notificaciones automáticas ni una etiqueta de «verificado» en esta etapa. Para ello se necesitarían acuerdos institucionales, moderación, identidad y tratamiento de datos.
+- [x] Aprovechar el enlace existente para incluir zona, período y, si corresponde, un foco identificable sin exponer coordenadas precisas de ubicaciones sensibles sin revisar su pertinencia.
+- [x] Presentar fecha, hora y sensor disponibles, fuente, última actualización y texto «detección satelital; no verificada en terreno».
+- [x] Probar copia y apertura del enlace en ambos idiomas, validación de parámetros, datos ausentes y compatibilidad con enlaces anteriores.
+- [x] No añadir cuentas, fotos, foros, notificaciones automáticas ni una etiqueta de «verificado» en esta etapa. Para ello se necesitarían acuerdos institucionales, moderación, identidad y tratamiento de datos.
 
 **Aceptación:** la persona receptora puede identificar qué se observó, dónde y cuándo, y distinguir una detección de una confirmación de campo.
 

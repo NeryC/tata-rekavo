@@ -20,6 +20,8 @@ export type ShareState = {
   metric?: "count" | "frp"; // URL param x; "count" is the default and is not written
   /** map points of a rolling window (URL param w); absent = the selected month, as in older links */
   win?: "24h" | "7d";
+  /** a hotspot shared for verification (URL param f): lat, lon rounded to 0.01 degree, UTC time YYYYMMDDHHMM or date YYYYMMDD */
+  hs?: { lat: number; lon: number; t: string };
 };
 
 const MAX_VERTICES = 120;
@@ -64,6 +66,7 @@ export function encodeState(s: ShareState): string {
   if (s.newOnly) p.set("new", "1");
   if (s.metric === "frp") p.set("x", "frp");
   if (s.win === "24h" || s.win === "7d") p.set("w", s.win);
+  if (s.hs) p.set("f", `${num(s.hs.lat)},${num(s.hs.lon)},${s.hs.t}`);
   // "," and ";" are legal in a query string; keeping them raw saves ~4 chars per
   // vertex so a 120-vertex polygon stays under 2000 chars. decodeState accepts both.
   return p.toString().replace(/%2C/gi, ",").replace(/%3B/gi, ";");
@@ -132,6 +135,12 @@ export function decodeState(search: string, bboxOf: BBoxOf = pryOnly): ShareStat
   if (p.get("x") === "frp") out.metric = "frp";
   const w = p.get("w");
   if (w === "24h" || w === "7d") out.win = w;
+  const f = p.get("f")?.split(",");
+  if (f && f.length === 3 && /^\d{8}(\d{4})?$/.test(f[2])) {
+    const v = parseNums(`${f[0]},${f[1]}`, 2);
+    const bbox = bboxOf(country);
+    if (v && bbox && v[0] >= bbox[1] && v[0] <= bbox[3] && v[1] >= bbox[0] && v[1] <= bbox[2]) out.hs = { lat: v[0], lon: v[1], t: f[2] };
+  }
 
   return out;
 }
