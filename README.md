@@ -139,6 +139,43 @@ node test_contract.mjs data/app
 
 Never commit the MAP_KEY. Pass it through the environment only.
 
+## Bolivia (pilot)
+
+The pipeline is country-configurable (`countries.json`); Bolivia is the first country after Paraguay, built into `data/app/BOL/` (Paraguay stays in `data/app/` until the app reads both). 0.25° grid (54 × 50, 1,577 cells with hotspots), 9 departments, 5 RESOLVE biomes as factor regions instead of a river split, FIRMS archives 2000–2025 (8.6 million hotspots scanned) plus the 2026 Area API data. No burn history and no per-hotspot export for Bolivia.
+
+```bash
+python firms_pipeline.py download --country BOL --data data/raw/BOL
+python firms_pipeline.py build --country BOL --data data/raw/BOL --out data/app/BOL
+python firms_pipeline.py validate --country BOL --data data/raw/BOL --out data/app/BOL
+python firms_pipeline.py build-regions --country BOL --out data/app/BOL
+python firms_pipeline.py build-season --country BOL --data data/raw/BOL --out data/app/BOL
+python firms_pipeline.py build-frp --country BOL --data data/raw/BOL --out data/app/BOL
+FIRMS_MAP_KEY=... python firms_pipeline.py fetch-current --country BOL --out data/app/BOL
+node test_contract.mjs data/app/BOL
+```
+
+**Validation (leave-one-year-out, same method as Paraguay).**
+
+| Level | Median error | 90th pct error | Bias |
+|---|---|---|---|
+| Bolivia × month | 7.4 % | 21.5 % | -1.0 % |
+| Moist broadleaf forests × month | 12.2 % | 36.8 % | -0.5 % |
+| Dry broadleaf forests × month | 11.5 % | 34.1 % | -1.7 % |
+| Grasslands, savannas, shrublands × month | 9.6 % | 28.0 % | -0.2 % |
+| Flooded grasslands and savannas × month | 23.2 % | 94.6 % | -1.1 % |
+| Montane grasslands and shrublands × month | 29.2 % | 100 % | -6.2 % |
+| 1° block × month | 22.4 % | 62.6 % | -1.0 % |
+| 0.25° cell × month | 34.6 % | 100 % | -1.0 % |
+
+The country median error (7.4 %) is under the 15 % gate. The verdict class matches the one VIIRS would give in 89.8 % of months (country), 76 % for 1° blocks. FRP (`frp.json`, not flagged experimental): Bolivia 9.1 %; by biome 12.1 % to 15.1 %, flooded grasslands 25.6 %, montane 46.3 %. Mean 2013–2025 vs 2003–2011: naive record ×3.39, harmonized ×0.80.
+
+**Bolivia limitations.**
+
+- **Two small biomes are noisy.** Flooded grasslands (23.2 %) and montane grasslands (29.2 %, FRP 46.3 %) are above 15 %. They have few clean overlap hotspots per month, so many calendar months fall back to the country factor (grid.json `factor_fallback`, Aqua / Terra: flooded grasslands 6 / 5 months, montane 8 / 12, moist forests 3 / 5). Read the error band, not the point value, for these zones.
+- **Back-extrapolation is biased.** Calibrating on 2019–2025 and predicting 2012–2018 overestimates VIIRS S-NPP by +9.6, +10.8, +21.7, +14.7, +9.7, +15.3 and +15.2 % per year (Paraguay: within about 6 %). The error model adds a systematic term for 2002–2012 (2 to 16 %) so the app's error bands for the MODIS-only years are wider than the random error alone.
+- **Cell level is coarse.** A 0.25° cell has 34.6 % median error and a 0.1° cell 47.0 %; the pilot uses a 0.25° grid for that reason.
+- **Biomes are an approximation.** Factor regions are RESOLVE biomes of the hotspot's 0.05° cell, not a fire-behaviour classification.
+
 ## Limitations
 
 - **2002–2011 cannot be checked directly**, because there is no VIIRS for those years. The closest evidence is the back-extrapolation test above.
@@ -164,6 +201,7 @@ Never commit the MAP_KEY. Pass it through the environment only.
   Citation: UNEP-WCMC and IUCN (2026), Protected Planet: The World Database on Protected Areas (WDPA) and World Database on Other Effective Area-based Conservation Measures (WD-OECM) [Online], November 2026, Cambridge, UK: UNEP-WCMC and IUCN. Available at: www.protectedplanet.net.
 - **RESOLVE Ecoregions 2017** (846 ecoregions in 14 biomes): https://storage.googleapis.com/teow2016/Ecoregions2017.zip (via https://ecoregions.appspot.com/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the factor regions of the countries outside Paraguay: clipped to Latin America, dissolved into biomes and rasterized at 0.05° (`data/ext/biomes_latam.npz`, see `data/ext/README.md`). Paraguay keeps its Chaco / Oriental split.
   Citation: Dinerstein, E., Olson, D., Joshi, A., Vynne, C., Burgess, N. D., Wikramanayake, E., et al. (2017). An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm. *BioScience* 67(6): 534-545. https://doi.org/10.1093/biosci/bix014
+- **geoBoundaries** gbOpen, Bolivia ADM1 (departments): https://www.geoboundaries.org/ (API: https://www.geoboundaries.org/api/current/gbOpen/BOL/ADM1/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the Bolivia department ranking and area selection; boundaries are simplified. Same citation as above.
 - **Indigenous territories:** not included yet. Next step: add them as a second context layer, with fire statistics only, if a source with terms that allow it is found.
 
 ## Use of AI
