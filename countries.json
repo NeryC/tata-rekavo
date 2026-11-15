@@ -1,0 +1,37 @@
+{
+  "PRY": {
+    "name": "Paraguay",
+    "firms_name": "Paraguay",
+    "area": "paraguay",
+    "bbox": [-62.8, -27.7, -54.1, -19.1],
+    "deg": 0.1,
+    "lat0": -28.0,
+    "lon0": -63.0,
+    "rows": 88,
+    "cols": 88,
+    "regions": {
+      "kind": "river-split",
+      "river_lat": [-27.5, -25.3, -24.1, -23.4, -22.1, -20.2, -19.0],
+      "river_lon": [-57.63, -57.63, -57.15, -57.43, -57.95, -58.15, -58.15],
+      "chaco_south": -25.35,
+      "names": ["chaco", "oriental"],
+      "labels": {"chaco": "Chaco", "oriental": "Oriental"},
+      "method": "Chaco = west of the Paraguay River (polyline) and north of {chaco_south:.2f}"
+    },
+    "export_hotspots": true,
+    "burn_history": true,
+    "fine": {"deg": 0.01, "rows": 900, "cols": 900},
+    "mask": {"deg": 0.05, "rows": 180, "cols": 180},
+    "departments": {
+      "merge": {"asuncion": "central", "capital": "central"},
+      "names": {
+        "alto-paraguay": "Alto Paraguay", "alto-parana": "Alto Paraná", "amambay": "Amambay",
+        "boqueron": "Boquerón", "caaguazu": "Caaguazú", "caazapa": "Caazapá", "canindeyu": "Canindeyú",
+        "central": "Central", "concepcion": "Concepción", "cordillera": "Cordillera", "guaira": "Guairá",
+        "itapua": "Itapúa", "misiones": "Misiones", "neembucu": "Ñeembucú", "paraguari": "Paraguarí",
+        "presidente-hayes": "Presidente Hayes", "san-pedro": "San Pedro"
+      },
+      "note": "Simplified department boundaries (geoBoundaries; original source DGEEC Paraguay). Asuncion is merged into Central (17 departments). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
+    }
+  }
+}

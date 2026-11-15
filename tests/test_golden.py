@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "tests" / "golden" / "pry_golden.json"
 RAW = ROOT / "data" / "raw"
 EXT = ROOT / "data" / "ext"
-COUNTRY_ARGS: list = []   # extra arguments passed to every command
+COUNTRY_ARGS = ["--country", "PRY"]   # extra arguments passed to every command
 
 # (subcommand, arguments) in dependency order: validate and build-regions read grid.json, build-season reads departments.json
 COMMANDS = [

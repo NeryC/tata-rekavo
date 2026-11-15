@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tata Rekavo - MODIS/VIIRS active-fire harmonization pipeline (Paraguay)
+Tata Rekavo - MODIS/VIIRS active-fire harmonization pipeline (per country; Paraguay by default)
 NASA Space Apps Challenge 2026 - "Harmonization of MODIS and VIIRS Hot Spots"
 
 Subcommands
@@ -18,7 +18,8 @@ Method (short)
   computed over the overlap Feb 2012 - Dec 2025 on days where both sensors delivered data.
   Before Feb 2012: Aqua hotspots x f.  From Feb 2012: VIIRS S-NPP observed.
   Sensor outage days are filled with the twin sensor (NOAA-20 for S-NPP, Terra for Aqua).
-  Regions: Chaco (west of the Paraguay River) / Oriental, approximated by a polyline.
+  Regions: per country (countries.json). Paraguay: Chaco (west of the Paraguay River) / Oriental, approximated by a polyline.
+  Every subcommand takes --country ISO3 (default PRY); grids, regions and names come from countries.json.
 
 Code written with AI assistance (a large language model) and reviewed by the team.
 """
@@ -33,31 +34,16 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from typing import Callable, Optional, TypeVar
 
 import numpy as np
 import pandas as pd
 
 # ----------------------------------------------------------------------------- constants
-COUNTRY = "Paraguay"
 ARCHIVE_URL = "https://firms.modaps.eosdis.nasa.gov/data/country/{src}/{year}/{src}_{year}_{country}.csv"
 API_BASE = "https://firms.modaps.eosdis.nasa.gov/api"
 ARCHIVE_YEARS = {"modis": range(2000, 2026), "viirs-snpp": range(2012, 2026), "viirs-jpss1": range(2018, 2026)}
-
-# Paraguay River approximation (latitude -> river longitude). Chaco = west of river and north of CHACO_SOUTH.
-RIVER_LAT = [-27.5, -25.3, -24.1, -23.4, -22.1, -20.2, -19.0]
-RIVER_LON = [-57.63, -57.63, -57.15, -57.43, -57.95, -58.15, -58.15]
-CHACO_SOUTH = -25.35
-REGIONS = ["chaco", "oriental"]
-
-GRID_DEG = 0.1          # app grid (~11 km)
-FINE_DEG = 0.01         # burn-history grid (~1.1 km)
-MASK_DEG = 0.05         # country mask used to clip API data (~5.5 km)
-LAT0, LON0 = -28.0, -63.0
-GRID_N = 88             # 88 x 0.1 deg covers -28..-19.2 / -63..-54.2
-FINE_N = 900
-MASK_N = 180
-BBOX = (-62.8, -27.7, -54.1, -19.1)  # west, south, east, north (for the API)
 
 START = (2002, 7)       # first full month with MODIS Aqua
 VIIRS_START = (2012, 2) # first full month with VIIRS S-NPP
@@ -94,15 +80,102 @@ def index_to_ym(m):
 VIIRS_START_IDX = int(month_index(*VIIRS_START))
 
 
-def region_of(lat, lon):
-    river = np.interp(lat, RIVER_LAT, RIVER_LON)
-    return np.where((lon < river) & (lat > CHACO_SOUTH), "chaco", "oriental")
+# ----------------------------------------------------------------------------- country config
+COUNTRIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "countries.json")
+DEFAULT_COUNTRY = "PRY"
 
 
-def cell_of(lat, lon, deg, n):
-    r = np.floor((np.asarray(lat) - LAT0) / deg).astype(int)
-    c = np.floor((np.asarray(lon) - LON0) / deg).astype(int)
-    ok = (r >= 0) & (r < n) & (c >= 0) & (c < n)
+@dataclass(frozen=True)
+class GridSpec:
+    """Regular lat/lon grid; cell (row, col) covers [lat0 + row*deg, +deg) x [lon0 + col*deg, +deg)."""
+    deg: float
+    lat0: float
+    lon0: float
+    rows: int
+    cols: int
+
+    def index(self, r, c):
+        return r * self.cols + c
+
+
+@dataclass(frozen=True)
+class CountryConfig:
+    """One entry of countries.json. The app grid (deg, lat0, lon0, rows, cols) may be non-square; the burn-history
+    (`fine`) and mask grids share its origin. `area` is the id of the whole-country series ("paraguay")."""
+    iso3: str
+    firms_name: str               # name used in the FIRMS country archive file names
+    bbox: tuple                   # west, south, east, north (for the Area API)
+    deg: float
+    lat0: float
+    lon0: float
+    rows: int
+    cols: int
+    regions: dict                 # {"kind": "river-split" | "biome", "names": [...], ...}
+    export_hotspots: bool
+    burn_history: bool
+    name: str = ""                # display name ("Paraguay")
+    area: str = ""                # country-level area id in the series ("paraguay")
+    fine: dict = field(default_factory=dict)         # {"deg", "rows", "cols"} burn-history grid (~1 km)
+    mask: dict = field(default_factory=dict)         # {"deg", "rows", "cols"} country mask used to clip API data
+    departments: dict = field(default_factory=dict)  # ADM1 display names / merges / note for build-regions
+
+    @property
+    def grid(self):
+        return GridSpec(self.deg, self.lat0, self.lon0, self.rows, self.cols)
+
+    @property
+    def fine_grid(self):
+        return GridSpec(self.fine["deg"], self.lat0, self.lon0, self.fine["rows"], self.fine["cols"])
+
+    @property
+    def mask_grid(self):
+        return GridSpec(self.mask["deg"], self.lat0, self.lon0, self.mask["rows"], self.mask["cols"])
+
+    @property
+    def region_names(self):
+        return list(self.regions["names"])
+
+    def region_label(self, region):
+        return self.regions.get("labels", {}).get(region, region)
+
+
+def load_country(iso3, path=None) -> CountryConfig:
+    path = path or COUNTRIES_PATH
+    with open(path, encoding="utf-8") as fh:
+        table = json.load(fh)
+    key = str(iso3).upper()
+    if key not in table:
+        raise ValueError(f"country {iso3!r} not in {path} (known: {', '.join(sorted(table))})")
+    c = dict(table[key])
+    c["bbox"] = tuple(c["bbox"])
+    return CountryConfig(iso3=key, **c)
+
+
+def region_of(lat, lon, cfg: CountryConfig):
+    reg = cfg.regions
+    kind = reg.get("kind")
+    if kind == "river-split":  # west of the river polyline (latitude -> river longitude) and north of chaco_south
+        river = np.interp(lat, reg["river_lat"], reg["river_lon"])
+        west, east = reg["names"]
+        return np.where((lon < river) & (lat > reg["chaco_south"]), west, east)
+    if kind == "biome":
+        raise NotImplementedError("biome regions are not implemented yet")
+    raise ValueError(f"unknown regions kind {kind!r} for {cfg.iso3}")
+
+
+def regions_meta(cfg: CountryConfig):
+    """Description of the factor regions stored in grid.json."""
+    reg = cfg.regions
+    if reg["kind"] == "river-split":
+        return {"method": reg["method"].format(**reg), "river_lat": reg["river_lat"], "river_lon": reg["river_lon"],
+                "chaco_south": reg["chaco_south"]}
+    return {"method": reg.get("method", reg["kind"]), "names": cfg.region_names}
+
+
+def cell_of(lat, lon, g: GridSpec):
+    r = np.floor((np.asarray(lat) - g.lat0) / g.deg).astype(int)
+    c = np.floor((np.asarray(lon) - g.lon0) / g.deg).astype(int)
+    ok = (r >= 0) & (r < g.rows) & (c >= 0) & (c < g.cols)
     return r, c, ok
 
 
@@ -152,13 +225,14 @@ def http_get(url, timeout=300):
 
 
 def cmd_download(args):
+    country = load_country(args.country).firms_name
     os.makedirs(args.data, exist_ok=True)
     jobs = [(s, y) for s, yrs in ARCHIVE_YEARS.items() for y in yrs]
     for src, year in jobs:
-        path = os.path.join(args.data, f"{src}_{year}_{COUNTRY}.csv")
+        path = os.path.join(args.data, f"{src}_{year}_{country}.csv")
         if os.path.exists(path) and os.path.getsize(path) > 0:
             continue
-        url = ARCHIVE_URL.format(src=src, year=year, country=COUNTRY)
+        url = ARCHIVE_URL.format(src=src, year=year, country=country)
         def fetch():
             _, body = http_get(url)
             if not body.startswith(b"latitude"):
@@ -182,9 +256,9 @@ def cmd_download(args):
 RENAME = {"bright_ti4": "brightness", "bright_ti5": "brightness_2", "bright_t31": "brightness_2"}
 
 
-def load_archives(data_dir):
+def load_archives(data_dir, firms_name):
     frames = []
-    for f in sorted(glob.glob(os.path.join(data_dir, f"*_{COUNTRY}.csv"))):
+    for f in sorted(glob.glob(os.path.join(data_dir, f"*_{firms_name}.csv"))):
         src = os.path.basename(f).split("_")[0]
         df = pd.read_csv(f, dtype={"acq_time": str, "confidence": str, "version": str, "satellite": str})
         df = df.rename(columns=RENAME)
@@ -221,11 +295,14 @@ def daily_flags(v):
     return d
 
 
-def compute_factors(v, flags, exclude_years=(), years=None, value_col: Optional[str] = None):
+def compute_factors(v, flags, exclude_years=(), years=None, value_col: Optional[str] = None, regions=None):
     """f[sensor][region][month] = VIIRS S-NPP / MODIS sensor, on clean overlap days.
+
+    regions: the region ids the factors are indexed by (default: every region present in v, sorted).
 
     value_col=None: ratio of hotspot counts. value_col="frp": ratio of summed values (rows with a NaN value
     are left out of the fit; zero values are kept); a region-month whose MODIS sum is 0 gets no factor (NaN)."""
+    regions = sorted(pd.unique(v.region)) if regions is None else list(regions)
     lo, hi = pd.Timestamp(*VIIRS_START, 1), pd.Timestamp(CALIB_END)
     clean_days = flags.index[(flags.index >= lo) & (flags.index <= hi) & ~flags.snpp_out & ~flags.aqua_out & ~flags.terra_out]
     c = v[v.date.isin(clean_days)]
@@ -248,7 +325,7 @@ def compute_factors(v, flags, exclude_years=(), years=None, value_col: Optional[
         r = num / den
         if value_col is not None:
             r = r.replace([np.inf, -np.inf], np.nan)
-        out[s] = r.reindex(pd.MultiIndex.from_product([REGIONS, range(1, 13)]))
+        out[s] = r.reindex(pd.MultiIndex.from_product([regions, range(1, 13)]))
     return out, clean_days
 
 
@@ -290,8 +367,8 @@ def bitpack(mask2d):
 
 
 # ----------------------------------------------------------------------------- build
-def grid_meta():
-    return {"deg": GRID_DEG, "lat0": LAT0, "lon0": LON0, "rows": GRID_N, "cols": GRID_N,
+def grid_meta(g: GridSpec):
+    return {"deg": g.deg, "lat0": g.lat0, "lon0": g.lon0, "rows": g.rows, "cols": g.cols,
             "cell_index": "row * cols + col; row = floor((lat-lat0)/deg), col = floor((lon-lon0)/deg)"}
 
 
@@ -301,18 +378,20 @@ def months_meta(n_months):
 
 
 def cmd_build(args):
+    cfg = load_country(args.country)
+    grid = cfg.grid
     os.makedirs(args.out, exist_ok=True)
-    a = load_archives(args.data)
+    a = load_archives(args.data, cfg.firms_name)
     v = vegetation(a).copy()
-    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
     v["m"] = month_index(v.year.values, v.month.values)
     flags = daily_flags(v)
-    f, clean_days = compute_factors(v, flags)
+    f, clean_days = compute_factors(v, flags, regions=cfg.region_names)
     v["w"], v["hsrc"] = harmonized_weights(v, flags, f)
     v = v[v.m >= 0]
     n_months = int(v.m.max()) + 1
-    r, c, ok = cell_of(v.latitude.values, v.longitude.values, GRID_DEG, GRID_N)
-    v["cell"] = np.where(ok, r * GRID_N + c, -1)
+    r, c, ok = cell_of(v.latitude.values, v.longitude.values, grid)
+    v["cell"] = np.where(ok, grid.index(r, c), -1)
     v = v[v.cell >= 0]
 
     # --- grid x month table
@@ -327,14 +406,14 @@ def cmd_build(args):
         cells.append([int(cell), grp.m.astype(int).tolist(), grp.h.round(1).tolist(),
                       grp.modis.astype(int).tolist(), grp.viirs.astype(int).tolist()])
     meta = {
-        "name": "Tata Rekavo harmonized hotspot record - Paraguay",
+        "name": f"Tata Rekavo harmonized hotspot record - {cfg.name}",
         "unit": "VIIRS S-NPP-equivalent vegetation-fire hotspots per month",
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "grid": grid_meta(), "months": months_meta(n_months),
+        "grid": grid_meta(grid), "months": months_meta(n_months),
         "cell_columns": ["cell_index", "month_indices", "harmonized", "modis_raw_terra_aqua", "viirs_snpp_raw"],
-        "regions": {"method": "Chaco = west of the Paraguay River (polyline) and north of %.2f" % CHACO_SOUTH,
-                    "river_lat": RIVER_LAT, "river_lon": RIVER_LON, "chaco_south": CHACO_SOUTH},
-        "factors": {s: {reg: [round(float(f[s][(reg, mo)]), 4) for mo in range(1, 13)] for reg in REGIONS} for s in ["aqua", "terra"]},
+        "regions": regions_meta(cfg),
+        "factors": {s: {reg: [round(float(f[s][(reg, mo)]), 4) for mo in range(1, 13)] for reg in cfg.region_names}
+                    for s in ["aqua", "terra"]},
         "factor_definition": "VIIRS S-NPP / MODIS {aqua|terra} hotspots, vegetation fires, clean overlap days %s..%s" % (
             clean_days.min().date(), clean_days.max().date()),
         "classes": CLASSES,
@@ -357,7 +436,7 @@ def cmd_build(args):
 
     # --- region / country monthly series (CSV + JSON)
     rows = []
-    for name, sel in [("paraguay", v), ("chaco", v[v.region == "chaco"]), ("oriental", v[v.region == "oriental"])]:
+    for name, sel in [(cfg.area, v)] + [(reg, v[v.region == reg]) for reg in cfg.region_names]:
         s = pd.DataFrame({"harmonized": sel.groupby("m").w.sum(),
                           "modis_raw": sel[sel.sensor.isin(["aqua", "terra"])].groupby("m").size(),
                           "viirs_snpp_raw": sel[sel.sensor == "snpp"].groupby("m").size()}).reindex(range(n_months)).fillna(0)
@@ -368,35 +447,40 @@ def cmd_build(args):
     reg.to_csv(os.path.join(args.out, "series_regions.csv"), index=False)
 
     # --- long CSV (cell x month), for analysis / download
-    rr, cc = np.divmod(t.cell.values, GRID_N)
+    rr, cc = np.divmod(t.cell.values, grid.cols)
     ym = [index_to_ym(m_) for m_ in t.m.values]
-    pd.DataFrame({"cell_lat": np.round(LAT0 + (rr + 0.5) * GRID_DEG, 3), "cell_lon": np.round(LON0 + (cc + 0.5) * GRID_DEG, 3),
+    pd.DataFrame({"cell_lat": np.round(grid.lat0 + (rr + 0.5) * grid.deg, 3), "cell_lon": np.round(grid.lon0 + (cc + 0.5) * grid.deg, 3),
                   "year": [y for y, _ in ym], "month": [m_ for _, m_ in ym], "harmonized": t.h.round(1).values,
                   "modis_raw": t.modis.astype(int).values, "viirs_snpp_raw": t.viirs.astype(int).values}
                  ).to_csv(os.path.join(args.out, "grid_monthly.csv"), index=False)
 
     # --- burn history (~1 km): last year burned and number of years burned, any sensor, Jul 2002 - end
-    fr, fc, fok = cell_of(v.latitude.values, v.longitude.values, FINE_DEG, FINE_N)
-    hist = pd.DataFrame({"k": (fr * FINE_N + fc)[fok], "y": v.year.values[fok]}).drop_duplicates()
-    last = np.zeros(FINE_N * FINE_N, np.uint8); nyr = np.zeros(FINE_N * FINE_N, np.uint8)
-    agg = hist.groupby("k").y.agg(["max", "size"])
-    last[agg.index.values] = (agg["max"].values - 2000).astype(np.uint8)
-    nyr[agg.index.values] = agg["size"].values.astype(np.uint8)
-    with open(os.path.join(args.out, "burn_history.json"), "w") as fh:
-        json.dump({"deg": FINE_DEG, "lat0": LAT0, "lon0": LON0, "rows": FINE_N, "cols": FINE_N,
-                   "period": "%04d-%02d..%s" % (START[0], START[1], meta["months"]["last"]),
-                   "last_year_minus_2000_b64": base64.b64encode(last.tobytes()).decode(),
-                   "years_burned_b64": base64.b64encode(nyr.tobytes()).decode(),
-                   "note": "uint8 arrays, row-major, index = row*cols+col; 0 = never detected"}, fh, separators=(",", ":"))
+    wrote = ["grid.json", "gaps.json", "series_regions.csv", "grid_monthly.csv"]
+    if cfg.burn_history:
+        fg = cfg.fine_grid
+        fr, fc, fok = cell_of(v.latitude.values, v.longitude.values, fg)
+        hist = pd.DataFrame({"k": fg.index(fr, fc)[fok], "y": v.year.values[fok]}).drop_duplicates()
+        last = np.zeros(fg.rows * fg.cols, np.uint8); nyr = np.zeros(fg.rows * fg.cols, np.uint8)
+        agg = hist.groupby("k").y.agg(["max", "size"])
+        last[agg.index.values] = (agg["max"].values - 2000).astype(np.uint8)
+        nyr[agg.index.values] = agg["size"].values.astype(np.uint8)
+        with open(os.path.join(args.out, "burn_history.json"), "w") as fh:
+            json.dump({"deg": fg.deg, "lat0": fg.lat0, "lon0": fg.lon0, "rows": fg.rows, "cols": fg.cols,
+                       "period": "%04d-%02d..%s" % (START[0], START[1], meta["months"]["last"]),
+                       "last_year_minus_2000_b64": base64.b64encode(last.tobytes()).decode(),
+                       "years_burned_b64": base64.b64encode(nyr.tobytes()).decode(),
+                       "note": "uint8 arrays, row-major, index = row*cols+col; 0 = never detected"}, fh, separators=(",", ":"))
+        wrote.append("burn_history.json")
 
     # --- country mask (~5.5 km) from every hotspot in the archive, used to clip API data
-    mr, mc, mok = cell_of(a.latitude.values, a.longitude.values, MASK_DEG, MASK_N)
-    mask = np.zeros((MASK_N, MASK_N), bool); mask[mr[mok], mc[mok]] = True
+    mg = cfg.mask_grid
+    mr, mc, mok = cell_of(a.latitude.values, a.longitude.values, mg)
+    mask = np.zeros((mg.rows, mg.cols), bool); mask[mr[mok], mc[mok]] = True
     with open(os.path.join(args.out, "mask.json"), "w") as fh:
-        json.dump({"deg": MASK_DEG, "lat0": LAT0, "lon0": LON0, "rows": MASK_N, "cols": MASK_N,
+        json.dump({"deg": mg.deg, "lat0": mg.lat0, "lon0": mg.lon0, "rows": mg.rows, "cols": mg.cols,
                    "bits_b64": bitpack(mask), "cells_in_mask": int(mask.sum()),
-                   "note": "cells with at least one FIRMS hotspot in the Paraguay country archives 2000-2025"}, fh)
-    log("wrote grid.json, gaps.json, series_regions.csv, grid_monthly.csv, burn_history.json, mask.json")
+                   "note": f"cells with at least one FIRMS hotspot in the {cfg.name} country archives 2000-2025"}, fh)
+    log("wrote " + ", ".join(wrote + ["mask.json"]))
 
 
 # ----------------------------------------------------------------------------- season climatology
@@ -429,16 +513,17 @@ def season_percentiles(cum):
 
 
 def cmd_build_season(args):
-    a = load_archives(args.data)
+    cfg = load_country(args.country)
+    a = load_archives(args.data, cfg.firms_name)
     v = vegetation(a).copy()
-    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
     flags = daily_flags(v)
-    f, _ = compute_factors(v, flags)
+    f, _ = compute_factors(v, flags, regions=cfg.region_names)
     v["w"], _ = harmonized_weights(v, flags, f)
-    r, c, ok = cell_of(v.latitude.values, v.longitude.values, GRID_DEG, GRID_N)
-    v["cell"] = np.where(ok, r * GRID_N + c, -1)
+    r, c, ok = cell_of(v.latitude.values, v.longitude.values, cfg.grid)
+    v["cell"] = np.where(ok, cfg.grid.index(r, c), -1)
     v = v[(v.cell >= 0) & v.year.between(*SEASON_YEARS)][["date", "region", "cell", "w"]]
-    parts = [v.assign(area="paraguay"), v.assign(area=v.region)]
+    parts = [v.assign(area=cfg.area), v.assign(area=v.region)]
     dp = os.path.join(args.out, "departments.json")
     if os.path.exists(dp):
         with open(dp, encoding="utf-8") as fh:
@@ -447,10 +532,11 @@ def cmd_build_season(args):
         area = v.cell.map(cell_dept)
         parts.append(v.assign(area=area)[area.notna().values])
     else:
-        log("departments.json missing: emitting only the 3 regions")
+        log("departments.json missing: emitting only the country and its regions")
     years = list(range(SEASON_YEARS[0], SEASON_YEARS[1] + 1))
     cum = daily_cumulative(pd.concat(parts, ignore_index=True)[["date", "area", "w"]], years)
-    order = ["paraguay", "chaco", "oriental"] + sorted(k for k in cum if k not in ("paraguay", "chaco", "oriental"))
+    head = [cfg.area] + cfg.region_names
+    order = head + sorted(k for k in cum if k not in head)
     doc = {"meta": {"years": list(SEASON_YEARS), "doy": 365, "unit": SEASON_UNIT,
                     "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")},
            "areas": {k: season_percentiles(cum[k]) for k in order if k in cum}}
@@ -463,16 +549,21 @@ def cmd_build_season(args):
 
 
 # ----------------------------------------------------------------------------- validate
-VALIDATION_LEVELS = {"country": [], "chaco": ["region"], "oriental": ["region"], "block_1deg": ["blk1"],
-                     "cell_0.5deg": ["g05"], "cell_0.25deg": ["g025"], "cell_0.1deg": ["g01"]}
+def validation_levels(cfg: CountryConfig):
+    """Aggregation levels of the validation: the country, each factor region, blocks and cells (key columns)."""
+    return {"country": [], **{reg: ["region"] for reg in cfg.region_names}, "block_1deg": ["blk1"],
+            "cell_0.5deg": ["g05"], "cell_0.25deg": ["g025"], "cell_0.1deg": ["g01"]}
 
 
-def validation_frame(v, clean_days):
+VALIDATION_MIN_OBS = {"block_1deg": 50, "cell_0.5deg": 30, "cell_0.25deg": 20, "cell_0.1deg": 10}  # country / regions: 1
+
+
+def validation_frame(v, clean_days, cfg: CountryConfig):
     """Hotspots of the clean overlap days, with the block / cell keys of every validation level."""
     c = v[v.date.isin(clean_days)].copy()
     c["blk1"] = (np.floor(c.latitude).astype(int) * 1000 + np.floor(c.longitude).astype(int))
     for deg, name in [(0.1, "g01"), (0.25, "g025"), (0.5, "g05")]:
-        c[name] = (np.floor((c.latitude - LAT0) / deg).astype(int) * 1000 + np.floor((c.longitude - LON0) / deg).astype(int))
+        c[name] = (np.floor((c.latitude - cfg.lat0) / deg).astype(int) * 1000 + np.floor((c.longitude - cfg.lon0) / deg).astype(int))
     return c
 
 
@@ -490,9 +581,9 @@ def predict_holdout(v, flags, c, train_years, test_years, value_col: Optional[st
     return te[te.sensor == "snpp"], aq
 
 
-def loyo_pairs(v, flags, c, value_col: Optional[str] = None, levels=None):
-    """Leave-one-year-out observed vs predicted tables per aggregation level (zone x month)."""
-    levels = VALIDATION_LEVELS if levels is None else levels
+def loyo_pairs(v, flags, c, levels, value_col: Optional[str] = None):
+    """Leave-one-year-out observed vs predicted tables per aggregation level (zone x month).
+    A level keyed by ["region"] is the region named like the level (see validation_levels)."""
     years = sorted(c.year.unique())
 
     def table(obs, aq, by):
@@ -506,7 +597,7 @@ def loyo_pairs(v, flags, c, value_col: Optional[str] = None, levels=None):
         obs, aq = predict_holdout(v, flags, c, [x for x in years if x != y], [y], value_col)
         for k, by in levels.items():
             tb = table(obs, aq, by).reset_index()
-            if k in ("chaco", "oriental"):
+            if by == ["region"]:
                 tb = tb[tb.region == k]
             pairs[k].append(tb)
     return {k: pd.concat(x) for k, x in pairs.items()}
@@ -578,18 +669,20 @@ def cmd_validate(args):
     import matplotlib.pyplot as plt
     from scipy.stats import spearmanr
 
-    a = load_archives(args.data)
+    cfg = load_country(args.country)
+    regions = cfg.region_names
+    a = load_archives(args.data, cfg.firms_name)
     v = vegetation(a).copy()
-    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
     v["m"] = month_index(v.year.values, v.month.values)
     flags = daily_flags(v)
-    _, clean_days = compute_factors(v, flags)
-    c = validation_frame(v, clean_days)
-    levels = VALIDATION_LEVELS
+    _, clean_days = compute_factors(v, flags, regions=regions)
+    c = validation_frame(v, clean_days, cfg)
+    levels = validation_levels(cfg)
 
     # leave-one-year-out
-    pairs = loyo_pairs(v, flags, c)
-    thr = {"country": 1, "chaco": 1, "oriental": 1, "block_1deg": 50, "cell_0.5deg": 30, "cell_0.25deg": 20, "cell_0.1deg": 10}
+    pairs = loyo_pairs(v, flags, c, levels)
+    thr = {k: VALIDATION_MIN_OBS.get(k, 1) for k in levels}
     loyo = {k: loyo_stats(t, thr[k]) for k, t in pairs.items()}
 
     # backward extrapolation: train 2019-2025, test 2012-2018
@@ -601,7 +694,7 @@ def cmd_validate(args):
     def classes(x):
         return pd.cut(x, [-1, .5, 1.5, 3, 1e9], labels=False)
     agree = {}
-    for k in ["country", "chaco", "oriental", "block_1deg"]:
+    for k in ["country", *regions, "block_1deg"]:
         t = pairs[k].copy()
         idx = levels[k] if k == "block_1deg" else []
         t["month"] = (t.m + START[1] - 1) % 12 + 1
@@ -617,7 +710,7 @@ def cmd_validate(args):
     def rel_err(n):
         return min(1.0, ec * max(n, 1) ** -ep)
 
-    f_all, _ = compute_factors(v, flags)
+    f_all, _ = compute_factors(v, flags, regions=regions)
     sys_by_year = systematic_by_year(v, clean_days, f_all["aqua"])
     error_model = error_model_doc(ec, ep, bstat, sys_by_year, "harmonized hotspots")
     metrics = {"method": "Aqua-based factor per region x calendar month, clean overlap days",
@@ -640,7 +733,7 @@ def cmd_validate(args):
     series = pd.read_csv(os.path.join(args.out, "series_regions.csv")) if os.path.exists(os.path.join(args.out, "series_regions.csv")) else None
     fig, ax = plt.subplots(1, 3, figsize=(17, 4.8))
     if series is not None:
-        s = series[(series.area == "paraguay") & (series.year.between(2003, 2025))].groupby("year")[["harmonized", "modis_raw", "viirs_snpp_raw"]].sum()
+        s = series[(series.area == cfg.area) & (series.year.between(2003, 2025))].groupby("year")[["harmonized", "modis_raw", "viirs_snpp_raw"]].sum()
         naive = np.where(s.index >= 2012, s.viirs_snpp_raw, s.modis_raw)
         ax[0].bar(s.index, naive, color=["#8a8a8a" if y < 2012 else "#d95f02" for y in s.index])
         ax[0].set_title("Naive record: MODIS until 2011, VIIRS after\n(the jump is the sensor, not the fire)")
@@ -650,17 +743,19 @@ def cmd_validate(args):
         ax[1].errorbar(pre_y, s.harmonized[pre_y], yerr=err, fmt="none", ecolor="black", capsize=3, lw=1.2)
         ax[1].set_title("Harmonized record (VIIRS S-NPP equivalent)\npurple = MODIS Aqua translated, orange = VIIRS observed")
         for x in ax[:2]:
-            x.set_ylabel("vegetation-fire hotspots per year, Paraguay")
+            x.set_ylabel(f"vegetation-fire hotspots per year, {cfg.name}")
             x.set_ylim(0, max(naive.max(), s.harmonized.max()) * 1.12)
-    t = pairs["chaco"].assign(r="chaco")
-    t = pd.concat([t, pairs["oriental"].assign(r="oriental")])
+    palette = ["#1b9e77", "#e7298a", "#7570b3", "#e6ab02", "#66a61e", "#a6761d"]
+    t = pd.concat([pairs[reg].assign(r=reg) for reg in regions])
     t = t[t.obs > 0]
-    ax[2].scatter(t.obs, t.pred, s=12, alpha=.6, c=np.where(t.r == "chaco", "#1b9e77", "#e7298a"))
+    colors = t.r.map({reg: palette[i % len(palette)] for i, reg in enumerate(regions)}).values
+    ax[2].scatter(t.obs, t.pred, s=12, alpha=.6, c=colors)
     lim = [10, t.obs.max() * 1.4]
     ax[2].plot(lim, lim, "k--", lw=1); ax[2].set_xscale("log"); ax[2].set_yscale("log"); ax[2].set_xlim(lim); ax[2].set_ylim(lim)
     ax[2].set_xlabel("VIIRS S-NPP observed (region-month)"); ax[2].set_ylabel("predicted from MODIS Aqua, year held out")
-    ax[2].set_title("Hold-out validation 2012-2025\nmedian error: Chaco %.1f%%, Oriental %.1f%%" % (loyo["chaco"]["mdape_pct"], loyo["oriental"]["mdape_pct"]))
-    fig.text(0.5, -0.02, "Data: NASA FIRMS (MODIS C6.1 Terra/Aqua, VIIRS 375 m S-NPP/NOAA-20), Paraguay, vegetation fires. "
+    ax[2].set_title("Hold-out validation 2012-2025\nmedian error: " +
+                    ", ".join("%s %.1f%%" % (cfg.region_label(reg), loyo[reg]["mdape_pct"]) for reg in regions))
+    fig.text(0.5, -0.02, f"Data: NASA FIRMS (MODIS C6.1 Terra/Aqua, VIIRS 375 m S-NPP/NOAA-20), {cfg.name}, vegetation fires. "
              "Error bars: modelled median error. AI-assisted figure.", ha="center", fontsize=8.5)
     plt.tight_layout()
     plt.savefig(os.path.join(args.out, "validation.png"), dpi=130, bbox_inches="tight")
@@ -689,20 +784,21 @@ def cmd_build_frp(args):
     """Harmonized Fire Radiative Power: same method as the counts with FRP sums (factor = sum S-NPP FRP /
     sum MODIS FRP per region x calendar month on clean overlap days), own leave-one-year-out validation."""
     t0 = time.time()
+    cfg = load_country(args.country)
     os.makedirs(args.out, exist_ok=True)
-    a = load_archives(args.data)
+    a = load_archives(args.data, cfg.firms_name)
     v = vegetation(a).copy()
-    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
     v["m"] = month_index(v.year.values, v.month.values)
     flags = daily_flags(v)
-    f, clean_days = compute_factors(v, flags, value_col="frp")
+    f, clean_days = compute_factors(v, flags, value_col="frp", regions=cfg.region_names)
     v["w"], v["hsrc"] = harmonized_weights(v, flags, f, value_col="frp")
 
     # leave-one-year-out validation + error model, exactly as for the counts
-    c = validation_frame(v, clean_days)
-    pairs = loyo_pairs(v, flags, c, value_col="frp")
+    c = validation_frame(v, clean_days, cfg)
+    pairs = loyo_pairs(v, flags, c, validation_levels(cfg), value_col="frp")
     loyo = {}
-    for name, level in [("paraguay", "country"), ("chaco", "chaco"), ("oriental", "oriental")]:
+    for name, level in [(cfg.area, "country")] + [(reg, reg) for reg in cfg.region_names]:
         s = loyo_stats(pairs[level], FRP_MIN_OBS)
         loyo[name] = {"mdape_pct": s["mdape_pct"], "p90_pct": s["p90_ape_pct"], "bias_pct": s["bias_pct"]}
     ec, ep, bstat = fit_error_model(pairs.values())
@@ -712,19 +808,19 @@ def cmd_build_frp(args):
     # cell x month FRP grid, same cell / month index as grid.json
     v = v[v.m >= 0]
     n_months = int(v.m.max()) + 1
-    r, cc, ok = cell_of(v.latitude.values, v.longitude.values, GRID_DEG, GRID_N)
-    v = v.assign(cell=np.where(ok, r * GRID_N + cc, -1))
+    r, cc, ok = cell_of(v.latitude.values, v.longitude.values, cfg.grid)
+    v = v.assign(cell=np.where(ok, cfg.grid.index(r, cc), -1))
     v = v[v.cell >= 0]
     t = v.groupby(["cell", "m"]).w.sum().rename("frp").reset_index()
     cells = frp_cells(t)
     meta = {
-        "name": "Tata Rekavo harmonized Fire Radiative Power - Paraguay (experimental)",
+        "name": f"Tata Rekavo harmonized Fire Radiative Power - {cfg.name} (experimental)",
         "unit": FRP_UNIT,
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "grid": grid_meta(), "months": months_meta(n_months),
+        "grid": grid_meta(cfg.grid), "months": months_meta(n_months),
         "cell_columns": ["cell_index", "month_indices", "frp_mw"],
         "cells_note": "only cell-months with harmonized FRP > 0 (rounded to 0.1 MW)",
-        "factors": {s: {reg: [_nan_none(f[s][(reg, mo)]) for mo in range(1, 13)] for reg in REGIONS} for s in ["aqua", "terra"]},
+        "factors": {s: {reg: [_nan_none(f[s][(reg, mo)]) for mo in range(1, 13)] for reg in cfg.region_names} for s in ["aqua", "terra"]},
         "factor_definition": "sum of VIIRS S-NPP FRP / sum of MODIS {aqua|terra} FRP, vegetation fires, clean overlap days %s..%s; "
                              "applied to each MODIS hotspot's FRP, S-NPP (and NOAA-20 fill) FRP used as observed" % (
                                  clean_days.min().date(), clean_days.max().date()),
@@ -732,7 +828,7 @@ def cmd_build_frp(args):
         "validation_note": "Aqua FRP x factor fitted without the held-out year vs S-NPP FRP observed, zone-months with "
                            ">= %g MW; mdape = median, p90 = 90th percentile of the absolute percentage error" % FRP_MIN_OBS,
         "error_model": {k: em[k] for k in ["formula", "c", "p", "sys_by_year", "meaning"]},
-        "experimental": bool(loyo["paraguay"]["mdape_pct"] > FRP_EXPERIMENTAL_MDAPE),
+        "experimental": bool(loyo[cfg.area]["mdape_pct"] > FRP_EXPERIMENTAL_MDAPE),
         "experimental_rule": "true when the country leave-one-year-out mdape_pct > %g" % FRP_EXPERIMENTAL_MDAPE,
         "sources": ["NASA FIRMS MODIS Collection 6.1 (Terra, Aqua) standard processing",
                     "NASA FIRMS VIIRS 375 m (Suomi NPP, NOAA-20) standard processing"],
@@ -797,9 +893,11 @@ def cmd_fetch_current(args):
     key = args.map_key or os.environ.get("FIRMS_MAP_KEY")
     if not key and not args.offline:
         sys.exit("set FIRMS_MAP_KEY or pass --map-key (free key: https://firms.modaps.eosdis.nasa.gov/api/map_key/)")
+    cfg = load_country(args.country)
+    mg, grid = cfg.mask_grid, cfg.grid
     with open(os.path.join(args.out, "mask.json")) as fh:
         mk = json.load(fh)
-    mask = np.unpackbits(np.frombuffer(base64.b64decode(mk["bits_b64"]), np.uint8))[: MASK_N * MASK_N].reshape(MASK_N, MASK_N).astype(bool)
+    mask = np.unpackbits(np.frombuffer(base64.b64decode(mk["bits_b64"]), np.uint8))[: mg.rows * mg.cols].reshape(mg.rows, mg.cols).astype(bool)
     start = pd.Timestamp(args.start)
     end = pd.Timestamp(args.end) if args.end else pd.Timestamp(dt.date.today())
     cache = args.cache
@@ -828,7 +926,7 @@ def cmd_fetch_current(args):
         elif args.offline:
             continue
         else:
-            url = f"{API_BASE}/area/csv/{key}/{prod}/{','.join(map(str, BBOX))}/{span}/{day.date()}"
+            url = f"{API_BASE}/area/csv/{key}/{prod}/{','.join(map(str, cfg.bbox))}/{span}/{day.date()}"
             try:
                 df = with_retries(lambda: api_csv(url), attempts=10, delay=lambda a: min(60, 4 * (a + 1)),
                                   on_retry=lambda e: log(f"retry {day.date()} {prod}: {redact(e, key)}"))
@@ -859,13 +957,13 @@ def cmd_fetch_current(args):
     df = df[[got.get(d) == p for d, p in zip(df.date, df["product"])]]
     if "type" in df.columns:
         df = df[df["type"].isna() | (df["type"] == 0)]
-    r, c, ok = cell_of(df.latitude.values, df.longitude.values, MASK_DEG, MASK_N)
+    r, c, ok = cell_of(df.latitude.values, df.longitude.values, mg)
     inside = np.zeros(len(df), bool)
     inside[ok] = mask[r[ok], c[ok]]
     df = df[inside].copy()
     df["m"] = month_index(df.date.dt.year.values, df.date.dt.month.values)
-    gr, gc, gok = cell_of(df.latitude.values, df.longitude.values, GRID_DEG, GRID_N)
-    df["cell"] = np.where(gok, gr * GRID_N + gc, -1)
+    gr, gc, gok = cell_of(df.latitude.values, df.longitude.values, grid)
+    df["cell"] = np.where(gok, grid.index(gr, gc), -1)
     grp = df[df.cell >= 0].groupby(["cell", "m"])
     t = grp.size().rename("n").to_frame()
     has_frp = "frp" in df.columns   # optional 4th array: FRP sum (MW) per month, observed VIIRS, no factor
@@ -892,14 +990,14 @@ def cmd_fetch_current(args):
                                       "(S-NPP preferred; NOAA-20 / NOAA-21 when S-NPP has no data; standard processing before near-real-time)",
                             "from": str(start.date()), "to": str(end.date()),
                             "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                            "clip": "Paraguay mask (mask.json)", "cell_columns": cell_columns,
+                            "clip": f"{cfg.name} mask (mask.json)", "cell_columns": cell_columns,
                             "month_coverage": month_cov,
                             "month_coverage_note": "share of the month's days with data (1 = complete month); comparisons are scaled by it",
                             "month_products": month_src, "days_without_data": missing_days},
                    "cells": cells}, fh, separators=(",", ":"))
     df.drop(columns=["date", "m", "cell"]).to_csv(hpath + ".tmp", index=False)
     atomic_replace([jpath + ".tmp", hpath + ".tmp"])  # both fully written first, so a crash never leaves a half file
-    log(f"current.json: {len(df):,} hotspots inside Paraguay, {len(cells)} cells, "
+    log(f"current.json: {len(df):,} hotspots inside {cfg.name}, {len(cells)} cells, "
         f"coverage {', '.join(f'{index_to_ym(m)[1]:02d}:{v:.0%}' for m, v in month_cov.items())}")
 
 
@@ -908,12 +1006,16 @@ def cmd_export_hotspots(args):
     """Individual hotspots of the harmonized period, split in 1-degree blocks (gzip CSV) so the app
     can download only the blocks a search touches."""
     import gzip
-    a = load_archives(args.data)
+    cfg = load_country(args.country)
+    if not cfg.export_hotspots:
+        log(f"export-hotspots is disabled for {cfg.iso3} (countries.json export_hotspots = false)")
+        return
+    a = load_archives(args.data, cfg.firms_name)
     v = vegetation(a).copy()
-    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
     v["m"] = month_index(v.year.values, v.month.values)
     flags = daily_flags(v)
-    f, _ = compute_factors(v, flags)
+    f, _ = compute_factors(v, flags, regions=cfg.region_names)
     v["w"], v["hsrc"] = harmonized_weights(v, flags, f)
     v = v[v.m >= 0]
     prod = {"aqua": "MODIS_SP", "terra": "MODIS_SP", "snpp": "VIIRS_SNPP_SP", "n20": "VIIRS_NOAA20_SP"}
@@ -946,16 +1048,6 @@ def cmd_export_hotspots(args):
 
 # ----------------------------------------------------------------------------- build-regions
 GEOBOUNDARIES_API = "https://www.geoboundaries.org/api/current/gbOpen/{iso3}/{level}/"
-
-# display names for the 17 departments (the source file may lack accents); key = slug
-DEPT_NAMES = {
-    "alto-paraguay": "Alto Paraguay", "alto-parana": "Alto Paraná", "amambay": "Amambay",
-    "boqueron": "Boquerón", "caaguazu": "Caaguazú", "caazapa": "Caazapá", "canindeyu": "Canindeyú",
-    "central": "Central", "concepcion": "Concepción", "cordillera": "Cordillera", "guaira": "Guairá",
-    "itapua": "Itapúa", "misiones": "Misiones", "neembucu": "Ñeembucú", "paraguari": "Paraguarí",
-    "presidente-hayes": "Presidente Hayes", "san-pedro": "San Pedro",
-}
-
 
 def dept_slug(name):
     """Lowercase ASCII slug: accents stripped, whitespace -> '-'."""
@@ -1046,24 +1138,25 @@ def _dist_to_geom(pt, geom):
     return best
 
 
-def build_departments(geojson, grid, report=None):
+def build_departments(geojson, grid, cfg: CountryConfig, report=None):
     """geoBoundaries ADM1 FeatureCollection + grid.json -> list of department dicts
-    {id, name, cells, bbox, geometry}. Asuncion is merged into Central. Grid cells whose centre falls
+    {id, name, cells, bbox, geometry}. Display names (the source file may lack accents) and merged units
+    (Paraguay: Asuncion into Central) come from cfg.departments, keyed by slug. Grid cells whose centre falls
     outside every polygon (border cells of the 0.1-degree grid vs the simplified outline) are assigned to
     the department with the nearest boundary, provided the centre is within one cell diagonal of it.
     If `report` (a dict) is given it receives the coverage before/after that step."""
+    names, merge = cfg.departments["names"], cfg.departments.get("merge", {})
     g = grid["meta"]["grid"]
     cell_ids = {int(c[0]) for c in grid["cells"]}
     units = {}
     for ft in geojson["features"]:
         props = ft["properties"]
         slug = dept_slug(props.get("shapeName") or props.get("name"))
-        if slug in ("asuncion", "capital"):
-            slug = "central"
+        slug = merge.get(slug, slug)
         units.setdefault(slug, []).append(ft["geometry"])
-    if set(units) != set(DEPT_NAMES):
-        raise ValueError(f"unexpected department set: unknown={sorted(set(units) - set(DEPT_NAMES))}, "
-                         f"missing={sorted(set(DEPT_NAMES) - set(units))}")
+    if set(units) != set(names):
+        raise ValueError(f"unexpected department set: unknown={sorted(set(units) - set(names))}, "
+                         f"missing={sorted(set(names) - set(units))}")
     geoms = {k: (v[0] if len(v) == 1 else _union_geoms(v)) for k, v in units.items()}
     order = sorted(geoms)
     args = dict(deg=g["deg"], lat0=g["lat0"], lon0=g["lon0"], rows=g["rows"], cols=g["cols"], cell_ids=cell_ids)
@@ -1088,7 +1181,7 @@ def build_departments(geojson, grid, report=None):
         coords = _round_coords(_geom_polygons(geoms[k]), 3)
         xs = [pt[0] for poly in coords for pt in poly[0]]
         ys = [pt[1] for poly in coords for pt in poly[0]]
-        out.append({"id": k, "name": DEPT_NAMES[k], "cells": cells[k],
+        out.append({"id": k, "name": names[k], "cells": cells[k],
                     "bbox": [min(xs), min(ys), max(xs), max(ys)],
                     "geometry": {"type": "MultiPolygon", "coordinates": coords}})
     return out
@@ -1096,20 +1189,19 @@ def build_departments(geojson, grid, report=None):
 
 def cmd_build_regions(args):
     from pathlib import Path
-    gj = Path(args.ext) / "pry_adm1.geojson"
+    cfg = load_country(args.country)
+    gj = Path(args.ext) / f"{cfg.iso3.lower()}_adm1.geojson"
     if args.refresh or not gj.exists():
-        fetch_boundaries("PRY", "ADM1", gj)
+        fetch_boundaries(cfg.iso3, "ADM1", gj)
     geojson = json.loads(gj.read_bytes())
     with open(os.path.join(args.out, "grid.json"), encoding="utf-8") as fh:
         grid = json.load(fh)
     rep = {}
-    deps = build_departments(geojson, grid, rep)
-    meta = {"source": "geoBoundaries gbOpen PRY ADM1", "license": "CC BY 4.0",
-            "url": GEOBOUNDARIES_API.format(iso3="PRY", level="ADM1"),
+    deps = build_departments(geojson, grid, cfg, rep)
+    meta = {"source": f"geoBoundaries gbOpen {cfg.iso3} ADM1", "license": "CC BY 4.0",
+            "url": GEOBOUNDARIES_API.format(iso3=cfg.iso3, level="ADM1"),
             "retrieved": dt.date.today().isoformat(),
-            "note": "Simplified department boundaries (geoBoundaries; original source DGEEC Paraguay). Asuncion is merged "
-                    "into Central (17 departments). A cell belongs to the department containing its centre; grid cells "
-                    "whose centre falls just outside the simplified outline go to the nearest department."}
+            "note": cfg.departments["note"]}
     path = os.path.join(args.out, "departments.json")
     with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
         json.dump({"meta": meta, "departments": deps}, fh, ensure_ascii=False, separators=(",", ":"))
@@ -1119,7 +1211,7 @@ def cmd_build_regions(args):
 
 
 # ----------------------------------------------------------------------------- main
-def main():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = p.add_subparsers(dest="cmd", required=True)
     d = sp.add_parser("download"); d.add_argument("--data", default="data/raw"); d.add_argument("--retries", type=int, default=6)
@@ -1132,8 +1224,14 @@ def main():
     fr = sp.add_parser("build-frp"); fr.add_argument("--data", default="data/raw"); fr.add_argument("--out", default="data/app")
     sn = sp.add_parser("build-season"); sn.add_argument("--data", default="data/raw"); sn.add_argument("--out", default="data/app")
     r = sp.add_parser("build-regions"); r.add_argument("--out", default="data/app"); r.add_argument("--ext", default="data/ext")
-    r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/pry_adm1.geojson exists")
-    a = p.parse_args()
+    r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/<iso3>_adm1.geojson exists")
+    for sub in sp.choices.values():
+        sub.add_argument("--country", default=DEFAULT_COUNTRY, help="ISO3 code of an entry in countries.json (default PRY)")
+    return p.parse_args(argv)
+
+
+def main():
+    a = parse_args()
     {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current,
      "build-regions": cmd_build_regions, "build-season": cmd_build_season, "build-frp": cmd_build_frp}[a.cmd](a)
 

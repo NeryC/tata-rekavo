@@ -2,12 +2,17 @@ import argparse
 import base64
 import json
 import urllib.error
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import firms_pipeline
-from firms_pipeline import api_csv, cmd_fetch_current, index_to_ym, month_index, region_of, with_retries
+from firms_pipeline import (CountryConfig, GridSpec, api_csv, cell_of, cmd_fetch_current, index_to_ym, load_country,
+                            month_index, region_of, with_retries)
+
+PRY = load_country("PRY")
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_month_index_start():
@@ -19,11 +24,71 @@ def test_index_to_ym():
 
 
 def test_region_of_chaco():
-    assert str(region_of(-22, -60)) == "chaco"
+    assert str(region_of(-22, -60, PRY)) == "chaco"
 
 
 def test_region_of_oriental():
-    assert str(region_of(-25.3, -55)) == "oriental"
+    assert str(region_of(-25.3, -55, PRY)) == "oriental"
+
+
+# ----------------------------------------------------------------------------- country config
+def test_load_country_pry_keeps_the_paraguay_constants():
+    c = load_country("PRY")
+    assert isinstance(c, CountryConfig)
+    assert c.iso3 == "PRY" and c.firms_name == "Paraguay" and c.area == "paraguay"
+    assert c.bbox == (-62.8, -27.7, -54.1, -19.1)
+    assert (c.deg, c.lat0, c.lon0, c.rows, c.cols) == (0.1, -28.0, -63.0, 88, 88)
+    assert c.region_names == ["chaco", "oriental"]
+    assert c.regions["kind"] == "river-split" and c.regions["chaco_south"] == -25.35
+    assert c.export_hotspots is True and c.burn_history is True
+    assert c.grid == GridSpec(0.1, -28.0, -63.0, 88, 88)
+    assert c.fine_grid == GridSpec(0.01, -28.0, -63.0, 900, 900)
+    assert c.mask_grid == GridSpec(0.05, -28.0, -63.0, 180, 180)
+
+
+def test_load_country_is_case_insensitive_and_rejects_unknown():
+    assert load_country("pry").iso3 == "PRY"
+    with pytest.raises(ValueError, match="XXX"):
+        load_country("XXX")
+
+
+def _config(tmp_path, **over):
+    raw = json.loads((ROOT / "countries.json").read_text(encoding="utf-8"))["PRY"]
+    raw.update(over)
+    p = tmp_path / "countries.json"
+    p.write_text(json.dumps({"TST": raw}), encoding="utf-8")
+    return load_country("TST", p)
+
+
+def test_cell_of_non_square_grid():
+    g = GridSpec(deg=0.5, lat0=0.0, lon0=0.0, rows=2, cols=4)
+    r, c, ok = cell_of([0.1, 0.9, 0.9, 1.1, 0.1], [0.1, 1.9, 2.1, 0.1, -0.1], g)
+    assert list(r) == [0, 1, 1, 2, 0] and list(c) == [0, 3, 4, 0, -1]
+    assert list(ok) == [True, True, False, False, False]
+    assert g.index(1, 3) == 7
+
+
+def test_region_of_biome_not_implemented_yet(tmp_path):
+    cfg = _config(tmp_path, regions={"kind": "biome", "names": ["a", "b"]})
+    with pytest.raises(NotImplementedError):
+        region_of(-22, -60, cfg)
+
+
+def test_region_of_unknown_kind_rejected(tmp_path):
+    cfg = _config(tmp_path, regions={"kind": "nope", "names": ["a"]})
+    with pytest.raises(ValueError, match="nope"):
+        region_of(-22, -60, cfg)
+
+
+def test_every_subcommand_takes_country(monkeypatch):
+    seen = {}
+    for name in ["download", "build", "export-hotspots", "validate", "fetch-current", "build-regions", "build-season", "build-frp"]:
+        monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", name, "--country", "pry"])
+        args = firms_pipeline.parse_args()
+        seen[name] = args.country
+        monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", name])
+        assert firms_pipeline.parse_args().country == "PRY"
+    assert set(seen.values()) == {"pry"}
 
 
 # ----------------------------------------------------------------------------- retries / atomic writes
@@ -104,10 +169,10 @@ def test_api_csv_parses_csv(monkeypatch):
 def _fetch_args(tmp_path):
     out = tmp_path / "app"
     out.mkdir()
-    n = firms_pipeline.MASK_N
-    (out / "mask.json").write_text(json.dumps({"bits_b64": base64.b64encode(np.packbits(np.ones(n * n, bool)).tobytes()).decode()}))
+    n = PRY.mask_grid.rows * PRY.mask_grid.cols
+    (out / "mask.json").write_text(json.dumps({"bits_b64": base64.b64encode(np.packbits(np.ones(n, bool)).tobytes()).decode()}))
     return out, argparse.Namespace(out=str(out), map_key=KEY, start="2026-01-01", end="2026-01-03",
-                                   cache=str(tmp_path / "cache"), offline=False)
+                                   cache=str(tmp_path / "cache"), offline=False, country="PRY")
 
 
 def test_fetch_current_exits_2_and_keeps_outputs_when_api_down(tmp_path, monkeypatch, capsys):
@@ -241,7 +306,7 @@ def test_departments_real_data():
     if not gj.exists():
         pytest.skip("data/ext/pry_adm1.geojson not present")
     grid = json.loads((ROOT / "data" / "app" / "grid.json").read_text(encoding="utf-8"))
-    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid)
+    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, PRY)
     assert len(deps) == 17
     assert len({d["id"] for d in deps}) == 17
     seen = set()
@@ -435,7 +500,7 @@ def test_harmonized_weights_value_col_scales_by_frp():
     v = pd.DataFrame({"date": [d] * 4, "sensor": ["snpp", "snpp", "snpp", "aqua"], "region": ["chaco"] * 4,
                       "month": [3] * 4, "frp": [4.0, 0.0, np.nan, 10.0]})
     flags = pd.DataFrame({"snpp_out": [False], "aqua_out": [False], "terra_out": [False], "n20": [0]}, index=[d])
-    idx = pd.MultiIndex.from_product([firms_pipeline.REGIONS, range(1, 13)])
+    idx = pd.MultiIndex.from_product([PRY.region_names, range(1, 13)])
     f = {"aqua": pd.Series(0.5, index=idx), "terra": pd.Series(0.7, index=idx)}
     w_cnt, src_cnt = firms_pipeline.harmonized_weights(v, flags, f)
     w, src = firms_pipeline.harmonized_weights(v, flags, f, value_col="frp")
