@@ -220,8 +220,11 @@ def daily_flags(v):
     return d
 
 
-def compute_factors(v, flags, exclude_years=(), years=None):
-    """f[sensor][region][month] = VIIRS S-NPP / MODIS sensor, on clean overlap days."""
+def compute_factors(v, flags, exclude_years=(), years=None, value_col: Optional[str] = None):
+    """f[sensor][region][month] = VIIRS S-NPP / MODIS sensor, on clean overlap days.
+
+    value_col=None: ratio of hotspot counts. value_col="frp": ratio of summed values (rows with a NaN value
+    are left out of the fit; zero values are kept); a region-month whose MODIS sum is 0 gets no factor (NaN)."""
     lo, hi = pd.Timestamp(*VIIRS_START, 1), pd.Timestamp(CALIB_END)
     clean_days = flags.index[(flags.index >= lo) & (flags.index <= hi) & ~flags.snpp_out & ~flags.aqua_out & ~flags.terra_out]
     c = v[v.date.isin(clean_days)]
@@ -229,16 +232,37 @@ def compute_factors(v, flags, exclude_years=(), years=None):
         c = c[c.year.isin(years)]
     if len(exclude_years):
         c = c[~c.year.isin(exclude_years)]
-    num = c[c.sensor == "snpp"].groupby(["region", "month"]).size()
+    if value_col is None:
+        def agg(sel):
+            return sel.groupby(["region", "month"]).size()
+    else:
+        c = c[c[value_col].notna()]
+
+        def agg(sel):
+            return sel.groupby(["region", "month"])[value_col].sum()
+    num = agg(c[c.sensor == "snpp"])
     out = {}
     for s in ["aqua", "terra"]:
-        den = c[c.sensor == s].groupby(["region", "month"]).size()
-        out[s] = (num / den).reindex(pd.MultiIndex.from_product([REGIONS, range(1, 13)]))
+        den = agg(c[c.sensor == s])
+        r = num / den
+        if value_col is not None:
+            r = r.replace([np.inf, -np.inf], np.nan)
+        out[s] = r.reindex(pd.MultiIndex.from_product([REGIONS, range(1, 13)]))
     return out, clean_days
 
 
-def harmonized_weights(v, flags, f):
-    """Weight of every hotspot in the harmonized record (0 = not used)."""
+def harmonized_weights(v, flags, f, value_col: Optional[str] = None):
+    """Weight of every hotspot in the harmonized record (0 = not used).
+
+    With value_col (e.g. "frp", with FRP factors in f) the weight is multiplied by that value (NaN -> 0),
+    i.e. the hotspot's contribution to the harmonized FRP sum."""
+    w, src = _harmonized_weights(v, flags, f)
+    if value_col is not None:
+        w = w * np.nan_to_num(v[value_col].to_numpy(dtype=float), nan=0.0)
+    return w, src
+
+
+def _harmonized_weights(v, flags, f):
     day = flags.reindex(v.date)
     snpp_out, aqua_out = day.snpp_out.values, day.aqua_out.values
     n20_has = day.n20.values > 0
@@ -431,6 +455,115 @@ def cmd_build_season(args):
 
 
 # ----------------------------------------------------------------------------- validate
+VALIDATION_LEVELS = {"country": [], "chaco": ["region"], "oriental": ["region"], "block_1deg": ["blk1"],
+                     "cell_0.5deg": ["g05"], "cell_0.25deg": ["g025"], "cell_0.1deg": ["g01"]}
+
+
+def validation_frame(v, clean_days):
+    """Hotspots of the clean overlap days, with the block / cell keys of every validation level."""
+    c = v[v.date.isin(clean_days)].copy()
+    c["blk1"] = (np.floor(c.latitude).astype(int) * 1000 + np.floor(c.longitude).astype(int))
+    for deg, name in [(0.1, "g01"), (0.25, "g025"), (0.5, "g05")]:
+        c[name] = (np.floor((c.latitude - LAT0) / deg).astype(int) * 1000 + np.floor((c.longitude - LON0) / deg).astype(int))
+    return c
+
+
+def predict_holdout(v, flags, c, train_years, test_years, value_col: Optional[str] = None):
+    """Aqua factors fitted on train_years, applied to the test years of c. Returns (S-NPP rows, Aqua rows with p),
+    p = factor (counts) or factor x value_col (e.g. FRP)."""
+    fa, _ = compute_factors(v, flags, years=train_years, value_col=value_col)
+    te = c[c.year.isin(test_years)]
+    aq = te[te.sensor == "aqua"]
+    key = pd.MultiIndex.from_arrays([aq.region.values, aq.month.values])
+    p = fa["aqua"].reindex(key).values
+    if value_col is not None:
+        p = p * aq[value_col].to_numpy(dtype=float)
+    aq = aq.assign(p=p)
+    return te[te.sensor == "snpp"], aq
+
+
+def loyo_pairs(v, flags, c, value_col: Optional[str] = None, levels=None):
+    """Leave-one-year-out observed vs predicted tables per aggregation level (zone x month)."""
+    levels = VALIDATION_LEVELS if levels is None else levels
+    years = sorted(c.year.unique())
+
+    def table(obs, aq, by):
+        g = obs.groupby(by + ["m"])
+        o = (g.size() if value_col is None else g[value_col].sum()).rename("obs")
+        p = aq.groupby(by + ["m"]).p.sum().rename("pred")
+        return pd.concat([o, p], axis=1).fillna(0)
+
+    pairs = {k: [] for k in levels}
+    for y in years:
+        obs, aq = predict_holdout(v, flags, c, [x for x in years if x != y], [y], value_col)
+        for k, by in levels.items():
+            tb = table(obs, aq, by).reset_index()
+            if k in ("chaco", "oriental"):
+                tb = tb[tb.region == k]
+            pairs[k].append(tb)
+    return {k: pd.concat(x) for k, x in pairs.items()}
+
+
+def loyo_stats(t, thr):
+    """Median / 90th-percentile absolute percentage error over zone-months with obs >= thr; bias over all."""
+    s = t[t.obs >= thr]
+    ape = np.abs(s.pred - s.obs) / s.obs
+    return {"mdape_pct": round(float(np.median(ape) * 100), 1),
+            "p90_ape_pct": round(float(np.quantile(ape, .9) * 100), 1),
+            "bias_pct": round(float((t.pred.sum() / t.obs.sum() - 1) * 100), 1), "n": int((t.obs >= thr).sum()),
+            "min_obs": thr}
+
+
+def fit_error_model(tables):
+    """Median relative error vs predicted value, pooled over the given obs/pred tables; power law
+    rel = c * n^(-p) fitted in log space, weighted by bin size. Returns (c, p, bin table)."""
+    pool = pd.concat([t[["obs", "pred"]] for t in tables])
+    pool = pool[pool.pred >= 1]
+    pool["rel"] = np.abs(pool.obs - pool.pred) / pool.pred
+    bins = np.unique(np.round(np.logspace(0, np.log10(pool.pred.max()), 30)))
+    pool["bin"] = pd.cut(pool.pred, bins)
+    bstat = pool.groupby("bin", observed=True).agg(n=("pred", "median"), rel=("rel", "median"), k=("rel", "size"))
+    bstat = bstat[bstat.k >= 30]
+    slope, intercept = np.polyfit(np.log(bstat.n.values), np.log(bstat.rel.values), 1, w=np.sqrt(bstat.k.values))
+    return float(np.exp(intercept)), float(-slope), bstat
+
+
+def systematic_by_year(v, clean_days, f_aqua, value_col: Optional[str] = None):
+    """Systematic term for the reconstructed years: Aqua-based vs Terra+Aqua-based reconstruction (country, yearly)."""
+    cl = v[v.date.isin(clean_days)]
+    if value_col is None:
+        num = cl[cl.sensor == "snpp"].groupby(["region", "month"]).size()
+        den = cl[cl.sensor.isin(["aqua", "terra"])].groupby(["region", "month"]).size()
+    else:
+        cl = cl[cl[value_col].notna()]
+        num = cl[cl.sensor == "snpp"].groupby(["region", "month"])[value_col].sum()
+        den = cl[cl.sensor.isin(["aqua", "terra"])].groupby(["region", "month"])[value_col].sum()
+    f_ta = (num / den)
+    pre = v[(v.m >= 0) & (v.m < VIIRS_START_IDX)]
+    ka = pd.MultiIndex.from_arrays([pre.region.values, pre.month.values])
+    fa_, fta_ = f_aqua.reindex(ka).values, f_ta.reindex(ka).values
+    if value_col is not None:
+        x = pre[value_col].to_numpy(dtype=float)
+        fa_, fta_ = fa_ * x, fta_ * x
+    rec_a = pd.Series(np.where(pre.sensor == "aqua", fa_, 0), index=pre.index).groupby(pre.year).sum()
+    rec_ta = pd.Series(np.where(pre.sensor.isin(["aqua", "terra"]), fta_, 0), index=pre.index).groupby(pre.year).sum()
+    return {int(y): round(float(abs(rec_ta[y] / rec_a[y] - 1)), 3) for y in rec_a.index}
+
+
+def error_model_doc(ec, ep, bstat, sys_by_year, what):
+    """The error model as stored in metrics.json / grid.json (what = the quantity n stands for)."""
+    def rel_err(n):
+        return min(1.0, ec * max(n, 1) ** -ep)
+    return {
+        "formula": f"relative_error(n) = min(1, c * n^(-p)) where n = {what} in the zone-month; "
+                   "for months before viirs_start add the systematic term in quadrature: sqrt(rel^2 + sys[year]^2); "
+                   "months from viirs_start are observed (no translation error)",
+        "c": round(ec, 4), "p": round(ep, 4), "sys_by_year": sys_by_year,
+        "meaning": "median absolute relative error (about half of zone-months fall inside the band)",
+        "fit_bins": [[round(float(n), 1), round(float(r), 4), int(k), round(rel_err(n), 4)] for n, r, k in bstat[["n", "rel", "k"]].values],
+    }
+
+
 def cmd_validate(args):
     import matplotlib
     matplotlib.use("Agg")
@@ -443,51 +576,16 @@ def cmd_validate(args):
     v["m"] = month_index(v.year.values, v.month.values)
     flags = daily_flags(v)
     _, clean_days = compute_factors(v, flags)
-    c = v[v.date.isin(clean_days)].copy()
-    c["blk1"] = (np.floor(c.latitude).astype(int) * 1000 + np.floor(c.longitude).astype(int))
-    for deg, name in [(0.1, "g01"), (0.25, "g025"), (0.5, "g05")]:
-        c[name] = (np.floor((c.latitude - LAT0) / deg).astype(int) * 1000 + np.floor((c.longitude - LON0) / deg).astype(int))
-    years = sorted(c.year.unique())
-
-    def predict(train_years, test_years):
-        fa, _ = compute_factors(v, flags, years=train_years)
-        te = c[c.year.isin(test_years)]
-        aq = te[te.sensor == "aqua"]
-        key = pd.MultiIndex.from_arrays([aq.region.values, aq.month.values])
-        aq = aq.assign(p=fa["aqua"].reindex(key).values)
-        return te[te.sensor == "snpp"], aq
-
-    levels = {"country": [], "chaco": ["region"], "oriental": ["region"], "block_1deg": ["blk1"],
-              "cell_0.5deg": ["g05"], "cell_0.25deg": ["g025"], "cell_0.1deg": ["g01"]}
-
-    def table(obs, aq, by):
-        o = obs.groupby(by + ["m"]).size().rename("obs")
-        p = aq.groupby(by + ["m"]).p.sum().rename("pred")
-        return pd.concat([o, p], axis=1).fillna(0)
+    c = validation_frame(v, clean_days)
+    levels = VALIDATION_LEVELS
 
     # leave-one-year-out
-    pairs = {k: [] for k in levels}
-    for y in years:
-        obs, aq = predict([x for x in years if x != y], [y])
-        for k, by in levels.items():
-            tb = table(obs, aq, by).reset_index()
-            if k in ("chaco", "oriental"):
-                tb = tb[tb.region == k]
-            pairs[k].append(tb)
-    pairs = {k: pd.concat(x) for k, x in pairs.items()}
-
-    def mdape(t, thr):
-        t = t[t.obs >= thr]
-        return float(np.median(np.abs(t.pred - t.obs) / t.obs) * 100)
-
+    pairs = loyo_pairs(v, flags, c)
     thr = {"country": 1, "chaco": 1, "oriental": 1, "block_1deg": 50, "cell_0.5deg": 30, "cell_0.25deg": 20, "cell_0.1deg": 10}
-    loyo = {k: {"mdape_pct": round(mdape(t, thr[k]), 1),
-                "p90_ape_pct": round(float(np.quantile(np.abs(t[t.obs >= thr[k]].pred - t[t.obs >= thr[k]].obs) / t[t.obs >= thr[k]].obs, .9) * 100), 1),
-                "bias_pct": round(float((t.pred.sum() / t.obs.sum() - 1) * 100), 1), "n": int((t.obs >= thr[k]).sum()),
-                "min_obs": thr[k]} for k, t in pairs.items()}
+    loyo = {k: loyo_stats(t, thr[k]) for k, t in pairs.items()}
 
     # backward extrapolation: train 2019-2025, test 2012-2018
-    obs, aq = predict(list(range(2019, 2026)), list(range(2012, 2019)))
+    obs, aq = predict_holdout(v, flags, c, list(range(2019, 2026)), list(range(2012, 2019)))
     bo = obs.groupby("year").size(); bp = aq.groupby("year").p.sum()
     backward = {int(y): round(float((bp[y] / bo[y] - 1) * 100), 1) for y in bo.index}
 
@@ -506,40 +604,14 @@ def cmd_validate(args):
                     "same_class_pct": round(float((classes(t.a_obs) == classes(t.a_pred)).mean() * 100), 1), "n": int(len(t))}
 
     # error model: median relative error vs predicted count, pooled over all aggregation levels
-    pool = pd.concat([t[["obs", "pred"]] for t in pairs.values()])
-    pool = pool[pool.pred >= 1]
-    pool["rel"] = np.abs(pool.obs - pool.pred) / pool.pred
-    bins = np.unique(np.round(np.logspace(0, np.log10(pool.pred.max()), 30)))
-    pool["bin"] = pd.cut(pool.pred, bins)
-    bstat = pool.groupby("bin", observed=True).agg(n=("pred", "median"), rel=("rel", "median"), k=("rel", "size"))
-    bstat = bstat[bstat.k >= 30]
-    # power law in log space, weighted by bin size: rel = c * n^(-p)
-    slope, intercept = np.polyfit(np.log(bstat.n.values), np.log(bstat.rel.values), 1, w=np.sqrt(bstat.k.values))
-    ec, ep = float(np.exp(intercept)), float(-slope)
+    ec, ep, bstat = fit_error_model(pairs.values())
 
     def rel_err(n):
         return min(1.0, ec * max(n, 1) ** -ep)
 
-    # systematic term for the reconstructed years: Aqua-based vs Terra+Aqua-based reconstruction (country, yearly)
     f_all, _ = compute_factors(v, flags)
-    cl = v[v.date.isin(clean_days)]
-    num = cl[cl.sensor == "snpp"].groupby(["region", "month"]).size()
-    den = cl[cl.sensor.isin(["aqua", "terra"])].groupby(["region", "month"]).size()
-    f_ta = (num / den)
-    pre = v[(v.m >= 0) & (v.m < VIIRS_START_IDX)]
-    ka = pd.MultiIndex.from_arrays([pre.region.values, pre.month.values])
-    rec_a = pd.Series(np.where(pre.sensor == "aqua", f_all["aqua"].reindex(ka).values, 0), index=pre.index).groupby(pre.year).sum()
-    rec_ta = pd.Series(np.where(pre.sensor.isin(["aqua", "terra"]), f_ta.reindex(ka).values, 0), index=pre.index).groupby(pre.year).sum()
-    sys_by_year = {int(y): round(float(abs(rec_ta[y] / rec_a[y] - 1)), 3) for y in rec_a.index}
-
-    error_model = {
-        "formula": "relative_error(n) = min(1, c * n^(-p)) where n = harmonized hotspots in the zone-month; "
-                   "for months before viirs_start add the systematic term in quadrature: sqrt(rel^2 + sys[year]^2); "
-                   "months from viirs_start are observed (no translation error)",
-        "c": round(ec, 4), "p": round(ep, 4), "sys_by_year": sys_by_year,
-        "meaning": "median absolute relative error (about half of zone-months fall inside the band)",
-        "fit_bins": [[round(float(n), 1), round(float(r), 4), int(k), round(rel_err(n), 4)] for n, r, k in bstat[["n", "rel", "k"]].values],
-    }
+    sys_by_year = systematic_by_year(v, clean_days, f_all["aqua"])
+    error_model = error_model_doc(ec, ep, bstat, sys_by_year, "harmonized hotspots")
     metrics = {"method": "Aqua-based factor per region x calendar month, clean overlap days",
                "leave_one_year_out": loyo, "backward_train_2019_2025_bias_pct": backward,
                "anomaly_class_agreement": agree, "error_model": error_model,
