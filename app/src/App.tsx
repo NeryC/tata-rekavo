@@ -8,6 +8,8 @@ import DepartmentRanking from "./DepartmentRanking";
 import ProtectedAreas from "./ProtectedAreas";
 import Glance, { type CaseLink } from "./Glance";
 import WeatherPanel from "./WeatherPanel";
+import HotspotWindowPanel from "./HotspotWindowPanel";
+import { inWindow, type HotspotWindow } from "./hotspotTime";
 import { historyPeriodLabel } from "./historyPeriod";
 import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
@@ -115,6 +117,9 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const [range, setRange] = useState<[number, number]>([0, 0]);
   const [naive, setNaive] = useState(false);
   const [newOnly, setNewOnly] = useState(false);
+  // the map points: the selected month (default) or a rolling window counted back from `now`
+  const [win, setWin] = useState<HotspotWindow>("month");
+  const [now, setNow] = useState(() => new Date());
   const [calMode, setCalMode] = useState<CalMode>("ratio");
   const [busy, setBusy] = useState<string | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
@@ -159,7 +164,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
       } else setPolygon(r.poly);
       setMonth(r.month);
       setRange(r.range);
-      setCalMode(r.cal); setNaive(r.naive); setMetric(r.metric);
+      setCalMode(r.cal); setNaive(r.naive); setMetric(r.metric); setWin(link.win ?? "month");
       if (!alive) return;
       setData(d);
       // second stage: hotspots and burn history arrive after the verdict is on screen
@@ -244,6 +249,20 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   }, [grid, month]);
   const monthHotspots = useMemo(() => (data ? data.hotspots.filter((h) => h.m === month) : []), [data, month]);
   const zoneMonthHotspots = useMemo(() => monthHotspots.filter((h) => zoneSet.has(h.cell)), [monthHotspots, zoneSet]);
+  // a rolling window only moves the map points; the verdict and the cells keep the selected month
+  const mapHotspots = useMemo(() => (!data || win === "month" ? monthHotspots : data.hotspots.filter((h) => inWindow(h.at, win, now))),
+    [data, win, now, monthHotspots]);
+  const untimed = useMemo(() => {
+    if (!data || win === "month") return 0;
+    const since = new Date(now.getTime() - (win === "24h" ? 1 : 7) * 864e5).toISOString().slice(0, 10);
+    return data.hotspots.filter((h) => !h.at && h.date >= since).length;
+  }, [data, win, now]);
+  // keep the window moving while it is shown
+  useEffect(() => {
+    if (win === "month") return;
+    const id = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(id);
+  }, [win]);
   const ranking = useMemo(
     () => (grid && departments && month >= 0 ? H.departmentRanking(grid, departments.departments, month, coverage(month), active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : undefined) : null),
     [grid, departments, month, coverage, active]);
@@ -292,6 +311,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     const defStart = Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastI).year, 1));
     const s: ShareState = { lang, country: country.iso3, cal: calMode, naive, newOnly };
     if (metric === "frp") s.metric = "frp";
+    if (win !== "month") s.win = win;
     if (zoneKind === "custom") {
       if (coords) s.c = coords; else if (polygon) s.poly = polygon;
       if (coords || polygon) s.zone = "custom";
@@ -301,7 +321,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     if (month >= 0 && month !== lastI) s.m = indexToMonth(first, month);
     if (range[0] !== defStart || range[1] !== lastI) s.range = [indexToMonth(first, range[0]), indexToMonth(first, range[1])];
     return encodeState(s);
-  }, [data, lang, country, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric]);
+  }, [data, lang, country, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric, win]);
 
   useEffect(() => {
     if (shareQs === null) return; // never overwrite the incoming URL before it has been restored
@@ -335,7 +355,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     setZoneKind(country.area); setDepartmentId(null); setPolygon(null); setCoords(null);
     setMonth(lastM);
     setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
-    setCalMode("ratio"); setNaive(false); setNewOnly(false); setMetric("count"); setDlError(null);
+    setCalMode("ratio"); setNaive(false); setNewOnly(false); setWin("month"); setMetric("count"); setDlError(null);
     setViewNonce((n) => n + 1);
     setMapMoved(false);
   }
@@ -344,7 +364,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const lastIdx = data ? data.grid.nMonths - 1 : -1;
   const startRange = data ? [Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastIdx).year, 1)), lastIdx] : [0, 0];
   const changed = !!data && (zoneKind !== country.area || drawing || coordsOpen || month !== lastIdx
-    || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || metric !== "count" || mapMoved);
+    || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || metric !== "count" || win !== "month" || mapMoved);
 
   const generated = data?.current?.generated;
   const stale = !!generated && isStale(generated, new Date());
@@ -714,6 +734,9 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                 onSelect={pickDepartment} />
             )}
 
+            <HotspotWindowPanel win={win} onWin={(w) => { setNow(new Date()); setWin(w); }} points={mapHotspots} untimed={untimed} now={now}
+              generated={data.current?.generated} timeZone={country.tz ?? "America/Asuncion"} zone={zoneSet} zoneLabel={zoneLabel} ready={hotspotsReady} />
+
             {data.hasBurnHistory && <section className="newplaces">
               <h2><span className="dot-new" aria-hidden />{t.newTitle}</h2>
               {monthHotspots.length > 0 ? (<>
@@ -820,6 +843,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                 <button onClick={() => downloadReport({ grid, series, coverage, i18n, zoneLabel, range, rangeLabel, mode: calMode, analytics,
                   lines: analyticsLines }, `tata-rekavo_report_${metricTag}${fileTag}.png`)}>{t.dlReport}</button>
                 {dlError && <p className="dl-error">{t.dlFailed} {dlError}</p>}
+                {win !== "month" && <p className="note">{t.dlRangeNote}</p>}
               </div>
               </details>
             </section>
@@ -864,7 +888,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
           <Suspense fallback={<div className="map-wrap" aria-busy="true" />}>
           <MapView grid={countGrid} metric={active} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
             countryBBox={country.bbox} showNew={data.hasBurnHistory}
-            outline={outline} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
+            outline={outline} hotspots={mapHotspots} newOnly={newOnly}
+            pointsPeriod={win === "24h" ? t.win24h.toLowerCase() : win === "7d" ? t.win7d.toLowerCase() : undefined} timeZone={country.tz ?? "America/Asuncion"} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setDepartmentId(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)}
             onUserMove={() => setMapMoved(true)} onViewReset={() => setMapMoved(false)} />

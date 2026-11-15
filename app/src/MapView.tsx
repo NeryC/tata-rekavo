@@ -4,6 +4,9 @@ import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import type { Grid } from "@core";
 import { cellPolygon, type Hotspot } from "./data";
 import type { I18n } from "./i18n";
+import { describeHotspot } from "./hotspotTime";
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // MapLibre 6 looks for its worker next to the library file; after bundling it lives in /assets
 maplibregl.setWorkerUrl(workerUrl);
@@ -43,6 +46,10 @@ interface Props {
   /** the selected zone's outline (a department boundary or the drawn polygon), if it has one */
   outline: GeoJSON.Geometry | null;
   hotspots: Hotspot[];
+  /** the period of the points when it is not the selected month ("last 24 hours"); undefined for the month */
+  pointsPeriod?: string;
+  /** the country's time zone, for the local time of a selected hotspot */
+  timeZone: string;
   newOnly: boolean;
   i18n: I18n;
   drawing: boolean;
@@ -149,12 +156,36 @@ export default function MapView(p: Props) {
           if (props.current.drawing) return;
           const f = e.features?.[0];
           if (!f) return;
+          // over a hotspot its own popup wins
+          if (m.queryRenderedFeatures(e.point, { layers: ["hotspots", "hotspots-new"] }).length) { popup.remove(); return; }
           m.getCanvas().style.cursor = "default";
           popup.setLngLat(e.lngLat)
             .setHTML(`<b>${props.current.i18n.num(Number(f.properties.v))}</b> ${props.current.i18n.t.hotspots}<br><span>${props.current.i18n.t.popupCell(props.current.monthLabel, Math.round(props.current.grid.meta.grid.deg * 111.32))}</span>`)
             .addTo(m);
         });
         m.on("mouseleave", "cells", () => popup.remove());
+        // a hotspot: when, with which sensor and from which product it was detected (hover with a mouse, tap on touch)
+        const hotspotPopup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 8, className: "hs-popup" });
+        const showHotspot = (e: maplibregl.MapLayerMouseEvent) => {
+          if (props.current.drawing) return;
+          const f = e.features?.[0];
+          if (!f || f.geometry.type !== "Point") return;
+          const q = f.properties as Record<string, string>;
+          const nul = (v: string | undefined) => (v === undefined || v === "" || v === "null" ? null : v);
+          const { t, lang } = props.current.i18n;
+          const d = describeHotspot({ date: q.date, at: nul(q.at), satellite: nul(q.satellite), instrument: nul(q.instrument),
+            confidence: nul(q.confidence), product: nul(q.product) }, lang, props.current.timeZone, t);
+          popup.remove();
+          hotspotPopup.setLngLat(f.geometry.coordinates as [number, number])
+            .setHTML(`<b>${esc(t.hsPopupTitle)}</b><br>${esc(d.when)}<br>${esc(t.hsSensor)}: ${esc(d.sensor)}<br>`
+              + `${esc(t.hsConfidence)}: ${esc(d.confidence)}<br><span>NASA FIRMS · ${esc(d.product)}</span>`)
+            .addTo(m);
+        };
+        for (const id of ["hotspots", "hotspots-new"]) {
+          m.on("click", id, showHotspot);
+          m.on("mouseenter", id, (e) => { m.getCanvas().style.cursor = "pointer"; showHotspot(e); });
+          m.on("mouseleave", id, () => { m.getCanvas().style.cursor = ""; });
+        }
         // after every move, compare the camera with the area's own framing:
         // covers mouse, wheel, keyboard, buttons and touch alike
         m.on("moveend", () => {
@@ -248,7 +279,9 @@ export default function MapView(p: Props) {
     (m.getSource("hotspots") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
       features: p.hotspots.filter((h) => !p.newOnly || h.fresh)
-        .map((h) => ({ type: "Feature", properties: { fresh: h.fresh ? 1 : 0 }, geometry: { type: "Point", coordinates: [h.lon, h.lat] } })),
+        .map((h) => ({ type: "Feature", properties: { fresh: h.fresh ? 1 : 0, date: h.date, at: h.at ?? "", satellite: h.satellite ?? "",
+          instrument: h.instrument ?? "", confidence: h.confidence ?? "", product: h.product ?? "" },
+          geometry: { type: "Point", coordinates: [h.lon, h.lat] } })),
     });
   }, [ready, p.hotspots, p.newOnly]);
 
@@ -296,7 +329,8 @@ export default function MapView(p: Props) {
         <div className="legend-ramp">
           {(p.metric === "frp" ? FRP_RAMP : CELL_RAMP).map(([v, c], i, a) => (<span key={v}><i style={{ background: c }} />{rampLabel(v, i === a.length - 1)}</span>))}
         </div>
-        {p.hotspots.length > 0 && !p.newOnly && <div className="legend-dots"><i /> {t.legendDots(num(p.hotspots.length))}</div>}
+        {p.hotspots.length > 0 && !p.newOnly && <div className="legend-dots"><i /> {p.pointsPeriod
+          ? t.legendDotsIn(num(p.hotspots.length), p.pointsPeriod) : t.legendDots(num(p.hotspots.length))}</div>}
         {p.hotspots.length > 0 && p.showNew && <div className="legend-dots new"><i /> {t.legendNew(num(nNew))}</div>}
       </div>
     </div>

@@ -6,6 +6,7 @@ import type { I18n } from "./i18n";
 import type { SeasonFile } from "./season";
 import { liveFileUrl, storeBase, validManifest, type LiveManifest } from "./liveData";
 import { newerSummary, validSummary, type SummaryFile } from "./highlights";
+import { provenance } from "./hotspotTime";
 
 export interface Hotspot {
   lon: number; lat: number; date: string; m: number; frp: number; cell: number;
@@ -13,6 +14,8 @@ export interface Hotspot {
   fresh: boolean;
   /** row in the unified hotspot CSV format (HOTSPOT_HEADER) */
   csv: string;
+  /** acquisition instant (UTC), satellite, instrument, confidence and product; null when unknown */
+  at: string | null; satellite: string | null; instrument: string | null; confidence: string | null; product: string | null;
 }
 
 export const HOTSPOT_HEADER = "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp,daynight,product,harmonized_weight,new_place";
@@ -279,7 +282,7 @@ async function loadHotspots(grid: Grid, hotspotsUrl: string, burnLoad: Promise<B
       const fresh = isFresh(lon, lat);
       const [time, ...rest] = keep.map((k) => (k >= 0 ? f[k] ?? "" : ""));
       const csv = [f[iLat], f[iLon], date, time.padStart(4, "0"), ...rest, "1", fresh ? "1" : "0"].join(",");
-      return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv };
+      return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv, ...provenance(cols, f) };
     });
   } catch { /* hotspots are optional */ }
   return { hotspots, historyPeriod: burnJson?.period ?? "", hasBurnHistory };
