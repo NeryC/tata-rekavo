@@ -102,7 +102,9 @@ if (countryArea === "paraguay") check(bhJson !== null, "burn_history.json presen
 if (!bhJson) console.log("     note: burn_history.json not found in " + dir + ", skipping burn-history checks");
 else {
   const bh = H.decodeBurnHistory(bhJson);
-  let burned = 0; for (let lat = -23.5; lat < -21; lat += 0.01) for (let lon = -61.5; lon < -59; lon += 0.01) if (bh.lastYearBurned(lon, lat)) burned++;
+  // a 2.5 x 2.5 degree box at the centre of the country's grid
+  const g = grid.meta.grid, cx = g.lon0 + g.cols * g.deg / 2, cy = g.lat0 + g.rows * g.deg / 2;
+  let burned = 0; for (let lat = cy - 1.25; lat < cy + 1.25; lat += 0.01) for (let lon = cx - 1.25; lon < cx + 1.25; lon += 0.01) if (bh.lastYearBurned(lon, lat)) burned++;
   check(burned > 0, `burn history decodes (${burned} of ~62,500 fine cells in the box burned at least once)`);
 }
 
