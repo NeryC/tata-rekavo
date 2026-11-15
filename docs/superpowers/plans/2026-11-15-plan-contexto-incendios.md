@@ -6,8 +6,8 @@
 
 | Etapa | Estado | Evidencia o siguiente paso |
 |---|---|---|
-| 1. Claridad de datos | Terminada localmente; pendiente PR | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
-| 2. Fecha y procedencia | En curso | Revisar el formato de FIRMS, las zonas horarias y la cobertura antes de añadir filtros. |
+| 1. Claridad de datos | Terminada; en PR | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
+| 2. Fecha y procedencia | En curso (rama `feat/procedencia-focos`) | Campos tipados, hora local con zona, filtros recientes y detalle accesible. |
 | 3. Área quemada | Pendiente | Confirmar acceso, licencia y piloto antes de integrar. |
 | 4. Caso Cerro Corá | Pendiente | Confirmar fuentes, permisos y datos disponibles. |
 | 5. Compartir para verificación | Pendiente | Depende de metadatos fiables de la etapa 2. |
@@ -47,12 +47,12 @@ Actualizar esta tabla al comenzar y terminar cada etapa, con pruebas, PR y bloqu
 
 **Archivos previstos:** `app/src/i18n.ts`, `app/src/App.tsx`, `app/src/data.ts`, `README.md` y pruebas relacionadas. El algoritmo existente y el nombre de la columna `new_place` del CSV se conservan por compatibilidad.
 
-- [ ] Cambiar los títulos y explicaciones en español e inglés a «Focos sin detecciones cercanas en el registro histórico» y su equivalente en inglés.
-- [ ] Mostrar el período real disponible del archivo `burn_history.json`, la vecindad aproximada de 1 km y que se comparan detecciones, no todas las áreas quemadas. No usar un año fijo cuando la fuente declare otro período.
-- [ ] Sustituir las frases que atribuyen el resultado a desmonte o vegetación que «no se había quemado» por una invitación neutral a consultar imágenes y fuentes de campo.
-- [ ] Revisar las explicaciones de foco, «normal» y «bajo»: aclarar que no equivalen a ausencia de peligro y mantener visible la fecha de actualización.
-- [ ] Comprobar casos con cero resultados, datos históricos ausentes y países sin `burn_history.json`; no mostrar que todos los focos son nuevos cuando falte el archivo.
-- [ ] Probar textos y estados en inglés y español, en móvil y escritorio. Verificar que los CSV y enlaces antiguos no cambien de significado.
+- [x] Cambiar los títulos y explicaciones en español e inglés a «Focos sin detecciones cercanas en el registro histórico» y su equivalente en inglés.
+- [x] Mostrar el período real disponible del archivo `burn_history.json`, la vecindad aproximada de 1 km y que se comparan detecciones, no todas las áreas quemadas. No usar un año fijo cuando la fuente declare otro período.
+- [x] Sustituir las frases que atribuyen el resultado a desmonte o vegetación que «no se había quemado» por una invitación neutral a consultar imágenes y fuentes de campo.
+- [x] Revisar las explicaciones de foco, «normal» y «bajo»: aclarar que no equivalen a ausencia de peligro y mantener visible la fecha de actualización.
+- [x] Comprobar casos con cero resultados, datos históricos ausentes y países sin `burn_history.json`; no mostrar que todos los focos son nuevos cuando falte el archivo.
+- [x] Probar textos y estados en inglés y español, en móvil y escritorio. Verificar que los CSV y enlaces antiguos no cambien de significado.
 
 **Aceptación:** la pantalla menciona detecciones y período; no afirma que antes no hubo fuego, ni infiere la causa. `npm.cmd test` y `npm.cmd run build` pasan desde `app`.
 
