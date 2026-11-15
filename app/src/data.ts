@@ -5,6 +5,7 @@ import { biomePresets } from "./regions";
 import type { I18n } from "./i18n";
 import type { SeasonFile } from "./season";
 import { liveFileUrl, storeBase, validManifest, type LiveManifest } from "./liveData";
+import { newerSummary, validSummary, type SummaryFile } from "./highlights";
 
 export interface Hotspot {
   lon: number; lat: number; date: string; m: number; frp: number; cell: number;
@@ -89,6 +90,15 @@ function loadLiveStore() {
     const manifest = validManifest(await getUrlJson(base + "latest.json", { cache: "no-cache" }));
     return manifest ? { base, manifest } : null;
   }));
+}
+
+let summaryCache: Promise<SummaryFile | null> | null = null;
+/** Every country's latest verdict (summary.json, ~1 kB): the live store's run when it is newer than the site's own file. */
+export function loadSummary(): Promise<SummaryFile | null> {
+  return (summaryCache ??= Promise.all([
+    getJson("summary.json", "").then(validSummary),
+    loadLiveStore().then((live) => (live ? getUrlJson(`${live.base}${live.manifest.prefix}summary.json`).then(validSummary) : null)),
+  ]).then(([own, live]) => newerSummary(own, live)));
 }
 
 const generatedOf = (j: unknown) => {

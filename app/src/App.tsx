@@ -6,13 +6,15 @@ import SeasonChart from "./SeasonChart";
 import ValidationPanel from "./ValidationPanel";
 import DepartmentRanking from "./DepartmentRanking";
 import ProtectedAreas from "./ProtectedAreas";
+import Glance, { type CaseLink } from "./Glance";
+import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadSeason, PARAGUAY, regionPresets, sourceOf,
+  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadSeason, loadSummary, PARAGUAY, regionPresets, sourceOf,
   type AppData, type CountryInfo, type DepartmentsFile,
 } from "./data";
 import { countryOf, decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
@@ -118,6 +120,10 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const [mapMoved, setMapMoved] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [hotspotsReady, setHotspotsReady] = useState(false); // individual hotspots and burn history loaded (second stage)
+  const [summary, setSummary] = useState<SummaryFile | null>(null); // every country's latest verdict; null until loaded or when missing
+  useEffect(() => { void loadSummary().then(setSummary); }, []);
+  // a case link can point at a section (#season, #per-year): scroll there once that section exists
+  const pendingHash = useRef(window.location.hash.slice(1));
   const [manualUrl, setManualUrl] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -223,6 +229,24 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const ranking = useMemo(
     () => (grid && departments && month >= 0 ? H.departmentRanking(grid, departments.departments, month, coverage(month), active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : undefined) : null),
     [grid, departments, month, coverage, active]);
+  // "right now" strip: the whole country and its departments in the latest month, always in hotspot counts
+  const countryNow = useMemo(() => {
+    if (!countGrid) return null;
+    const lastC = countGrid.nMonths - 1;
+    const cov = H.monthCoverage(countGrid.meta, lastC, data?.current ?? null);
+    const v = H.verdict(countGrid, H.zoneSeries(countGrid, [...countGrid.cells.keys()]).harmonized, lastC, cov);
+    const rows = departments ? H.departmentRanking(countGrid, departments.departments, lastC, cov) : null;
+    return { m: lastC, v, rows };
+  }, [countGrid, data, departments]);
+  useEffect(() => {
+    const id = pendingHash.current;
+    // wait for the second stage: the season curve appears with it and would push the sections below it down
+    if (!id || !data || !hotspotsReady) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    pendingHash.current = "";
+    requestAnimationFrame(() => el.scrollIntoView({ block: "start" }));
+  }, [data, hotspotsReady, season]);
   const analytics = useMemo(() => (grid && series ? rangeAnalytics(grid, series, coverage, range[0], range[1]) : null), [grid, series, coverage, range]);
 
   // estimated size of the hotspot download for this area and range
@@ -440,6 +464,45 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
       if (top < 0 || top > window.innerHeight) el.scrollIntoView({ block: "nearest", behavior });
     });
   };
+  // ---- "right now" strip: alert, real cases, every country
+  const nowLabel = (() => {
+    if (!countryNow) return "";
+    const o = H.monthOf(countGrid.meta, countryNow.m);
+    return i18n.monthLongLabel(o.year, o.month) + (countryNow.v.partial ? t.inProgress : "");
+  })();
+  const topNow = countryNow?.rows ? alertRows(countryNow.rows, 1).shown[0] ?? null : null;
+  const linkTo = (st: ShareState, hash = "") => `${window.location.origin}${window.location.pathname}?${encodeState({ lang, country: country.iso3, ...st })}${hash}`;
+  const alertMessage = () => {
+    if (!countryNow?.rows) return "";
+    const link = linkTo({ m: indexToMonth(countGrid.meta.months.first, countryNow.m) });
+    return alertText(countryNow.rows, countryName, nowLabel, link, {
+      head: t.alertHead, row: t.alertRow, none: t.alertNone, more: t.alertMore, see: t.alertSee, classes: t.classes,
+    }, i18n.ratio);
+  };
+  const shareAlert = async () => {
+    const text = alertMessage();
+    if (!text) return;
+    // phones: the system share sheet (WhatsApp, Telegram, SMS...); desktops: WhatsApp Web
+    const phone = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+    if (phone && typeof navigator.share === "function") {
+      try { await navigator.share({ text }); return; } catch (e) { if ((e as Error).name === "AbortError") return; }
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+  };
+  const copyAlert = async () => {
+    const text = alertMessage();
+    try { await navigator.clipboard.writeText(text); flash(t.alertCopied); } catch { setManualUrl(text); }
+  };
+  const seasonYearNow = H.monthOf(countGrid.meta, countGrid.nMonths - 1).year;
+  const cases: CaseLink[] = [
+    ...(country.iso3 === "PRY" ? [
+      { id: "hidden", title: t.caseHiddenTitle, text: t.caseHiddenText, href: linkTo({ zone: "department", dep: "alto-paraguay", m: "2024-09" }) },
+      { id: "record", title: t.caseRecordTitle, text: t.caseRecordText, href: linkTo({ m: "2020-10" }) },
+    ] : []),
+    { id: "jump", title: t.caseJumpTitle, text: country.iso3 === "PRY" ? t.caseJumpTextPry : t.caseJumpText, href: linkTo({ naive: true }, "#per-year") },
+    ...(season ? [{ id: "season", title: t.caseSeasonTitle(seasonYearNow), text: t.caseSeasonText, href: linkTo({}, "#season") }] : []),
+  ];
+
   const applyCoords = () => {
     const parse = (s: string) => parseFloat(s.replace(",", ".").replace("−", "-"));
     const lat = parse(coordsForm.lat), lon = parse(coordsForm.lon), r = parse(coordsForm.r);
@@ -486,6 +549,12 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
         {header}
         <main>
           <aside className="panel">
+            <Glance country={country} countries={countries} monthTitle={nowLabel}
+              now={countryNow && !countryNow.v.noData ? { classId: countryNow.v.class.id, ratio: Number.isFinite(countryNow.v.ratio) ? countryNow.v.ratio : null } : null}
+              top={topNow} hasDepartments={!!countryNow?.rows?.length}
+              onTop={() => { if (topNow && countryNow) { setMonth(countryNow.m); pickDepartment(topNow.id); } }}
+              onShare={() => void shareAlert()} onCopy={() => void copyAlert()} cases={cases} summary={summary}
+              onCountry={(c) => onCountry(c, null)} />
             <section className="sec-area">
               <h2>{t.step1}</h2>
               <div className={presetIds.length > 3 ? "seg area many" : "seg area"} role="group" aria-label={t.areaPresets}>
@@ -640,14 +709,14 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               </section>
             )}
             {!frpOn && season && data.current?.to && hotspotsReady && (
-              <section>
+              <section id="season">
                 <h2>{t.seasonTitle(zoneLabel)}</h2>
                 <SeasonChart season={season} zoneKind={zoneKind} departmentId={departmentId} hotspots={data.hotspots} zone={zoneSet}
                   to={data.current.to} daysWithoutData={data.current.days_without_data} />
               </section>
             )}
 
-            <section>
+            <section id="per-year">
               <div className="h2row">
                 <h2>{t.perYear}</h2>
                 {!frpOn && ( // raw sensor counts have no fire power counterpart in frp.json
