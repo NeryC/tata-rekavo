@@ -397,7 +397,8 @@ def test_departments_real_data_other_countries(iso3):
         pytest.skip(f"data/ext/{gj.name} or data/app/{iso3}/grid.json not present")
     grid = json.loads(grid_path.read_text(encoding="utf-8"))
     cfg = load_country(iso3)
-    extra = firms_pipeline.mask_cells(cfg, json.loads((grid_path.parent / "mask.json").read_text(encoding="utf-8")))         if cfg.departments.get("mask_cells") else set()
+    mask = json.loads((grid_path.parent / "mask.json").read_text(encoding="utf-8"))
+    extra = firms_pipeline.mask_cells(cfg, mask) if cfg.departments.get("mask_cells") else set()
     deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, cfg, extra_cells=extra)
     assert {d["id"]: d["name"] for d in deps} == DEPARTMENTS[iso3]    # slugs without accents, display names with them
     seen = set()
@@ -409,7 +410,7 @@ def test_departments_real_data_other_countries(iso3):
         assert w < e and s < n
         assert d["geometry"]["type"] == "MultiPolygon"
     data = {c[0] for c in grid["cells"]}
-    assert data <= seen <= data | extra   # every cell with data and every mask cell belongs to exactly one department
+    assert seen == data | extra   # every cell with data and every mask cell belongs to exactly one department
 
 
 def test_region_cells_bolivia_cover_the_grid_once():
