@@ -1,5 +1,5 @@
 import * as H from "@core";
-import type { CurrentMeta, DepartmentDef, Grid, GridMeta } from "@core";
+import type { ContextFile, CurrentMeta, DepartmentDef, Grid, GridMeta } from "@core";
 import type { I18n } from "./i18n";
 import type { SeasonFile } from "./season";
 
@@ -71,6 +71,27 @@ export function loadSeason(): Promise<SeasonFile | null> {
     .then((j): SeasonFile | null => (j && typeof j.areas === "object" && j.areas !== null && !Array.isArray(j.areas) ? (j as SeasonFile) : null))
     .catch(() => null);
   return seasonPromise;
+}
+
+let contextPromise: Promise<ContextFile | null> | null = null;
+/**
+ * context.json (fire statistics per protected area, WDPA; no geometry), fetched once.
+ * Resolves to null when it is missing or malformed: the protected-areas block is then hidden and the rest of the app is unaffected.
+ */
+export function loadContext(): Promise<ContextFile | null> {
+  contextPromise ??= fetch(url("context.json"))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j): ContextFile | null => {
+      const series = (x: { m?: unknown; n?: unknown; frp?: unknown } | null) => !!x && Array.isArray(x.m) && Array.isArray(x.n) && Array.isArray(x.frp);
+      const ok = j && j.meta && typeof j.meta.through === "string" && /^[0-9]{4}-[0-9]{2}$/.test(j.meta.through) && typeof j.meta.first === "string"
+        && typeof j.meta.citation === "string" && Array.isArray(j.areas) && j.zones && typeof j.zones === "object"
+        && j.areas.every((a: { id?: unknown; name?: unknown; departments?: unknown; regions?: unknown }) => a && typeof a.id === "string" && typeof a.name === "string"
+          && Array.isArray(a.departments) && Array.isArray(a.regions) && series(a as never))
+        && Object.values(j.zones as Record<string, never>).every(series);
+      return ok ? (j as ContextFile) : null;
+    })
+    .catch(() => null);
+  return contextPromise;
 }
 
 let frpPromise: Promise<unknown | null> | null = null;

@@ -296,6 +296,76 @@ export function departmentRanking(grid, departments, m, coverage = 1, lowSignalM
     || a.name.localeCompare(b.name, "es"));
 }
 
+// Protected areas: the context.json built by the pipeline holds fire STATISTICS per area (sparse monthly series, no geometry).
+const dedupedAreas = new WeakMap();
+
+/** Areas of a context file without repeated records (same name and same series, e.g. two identical biosphere reserve entries). */
+function uniqueAreas(context) {
+  let list = dedupedAreas.get(context);
+  if (!list) {
+    const seen = new Set();
+    list = context.areas.filter((a) => {
+      const key = `${a.name}|${a.m.join(",")}|${a.n.join(",")}|${a.frp.join(",")}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    dedupedAreas.set(context, list);
+  }
+  return list;
+}
+
+/** Value of a sparse series ({m, <field>}) at month m: a month that is not listed is 0. */
+function sparseAt(series, field, m) {
+  const k = series.m.indexOf(m);
+  return k < 0 ? 0 : series[field][k];
+}
+
+/**
+ * Fire inside protected areas for month m, from context.json (statistics per area, no geometry).
+ *
+ * - zoneId: "paraguay" | "chaco" | "oriental" | a department id (a key of context.zones). Returns null for any other id
+ *   (a custom area has no protected-area figures) and when m is later than context.meta.through: the figures stop there
+ *   and are never reused for a later month.
+ * - metric: "count" uses n (hotspots), "frp" uses frp (MW).
+ * - inside: the zone's value for that month from context.zones, which is the UNION of the areas (each hotspot once).
+ *   Areas overlap and hotspots count in every area that holds them, so the areas' values can add up to more than inside.
+ *   An area that crosses the zone's limits is listed with its whole value.
+ * - areas: the areas that overlap the zone (all for paraguay; by `regions` for chaco/oriental, by `departments` for a department),
+ *   repeated records removed, sorted by value descending (then name). Each: {id, name, desig, value, median, ratio, classId}.
+ *   ratio is value / median of the same calendar month in the area's previous years (missing months count as 0), the median scaled
+ *   by `coverage` like verdict() does for a month in progress. median is null when the area has no previous year (m < 12);
+ *   ratio and classId are null when there is no history or the median is 0 (too little to compare; treat like a low-signal row).
+ *   lowSignal is true when ratio is null or the median is below opts.lowSignalMedian (default 0): too little fire in a typical
+ *   month for a ratio to mean much (a median of 0.4 hotspots makes any month look x10). Callers should not show ratio/class then.
+ * - opts.classes: class thresholds for classId (grid.json meta.classes; default 0.5 / 1.5 / 3).
+ * - opts.zoneValue: the zone's value for the same month in the same unit (from verdict); share = inside / zoneValue, null without it.
+ */
+export function protectedSummary(context, zoneId, m, metric = "count", coverage = 1, { classes = DEFAULT_CLASSES, zoneValue, lowSignalMedian = 0 } = {}) {
+  const zone = context?.zones?.[zoneId];
+  if (!zone || !Array.isArray(context.areas)) return null;
+  const [ty, tm] = context.meta.through.split("-").map(Number);
+  if (m > indexOf({ months: { first: context.meta.first } }, ty, tm)) return null;
+  const field = metric === "frp" ? "frp" : "n";
+  const inside = sparseAt(zone, field, m);
+  const cls = { classes };
+  const areas = uniqueAreas(context)
+    .filter((a) => zoneId === "paraguay" || (zoneId === "chaco" || zoneId === "oriental" ? a.regions.includes(zoneId) : a.departments.includes(zoneId)))
+    .map((a) => {
+      const value = sparseAt(a, field, m);
+      const history = [];
+      for (let k = m - 12; k >= 0; k -= 12) history.push(sparseAt(a, field, k));
+      const med = history.length ? median(history) * coverage : null;
+      const ratio = med !== null && med > 0 ? value / med : null;
+      return {
+        id: a.id, name: a.name, desig: a.desig, value, median: med, ratio, classId: ratio === null ? null : classify(cls, ratio).id,
+        lowSignal: ratio === null || !(med >= lowSignalMedian),
+      };
+    })
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+  return { inside, share: zoneValue > 0 ? inside / zoneValue : null, areas };
+}
+
 /** Calendar matrix (years x 12) with ratio to the calendar-month median over the whole record. */
 export function calendar(grid, series) {
   const meta = grid.meta, n = grid.nMonths;

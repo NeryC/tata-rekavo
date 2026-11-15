@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { doyOf } from "../app/src/season.ts";
 import {
-  calendar, classify, currentCumulative, decodeFrp, decodeGrid, departmentRanking, indexOf, monthOf, seasonStatus, seriesToCSV,
+  calendar, classify, currentCumulative, decodeFrp, decodeGrid, departmentRanking, indexOf, monthOf, protectedSummary, seasonStatus, seriesToCSV,
   validationSummary, verdict, zoneSeries,
 } from "../harmonized.js";
 
@@ -455,4 +455,105 @@ test("departmentRanking: the low-signal threshold is a parameter (default 10, 10
   assert.equal(mw.lowSignal, true); // median 50 < 100
   const [edge] = departmentRanking(g, [dep("p", 1)], 48, 1, 50);
   assert.equal(edge.lowSignal, false); // exactly the threshold is solid
+});
+
+// ---------------------------------------------------------------- protected areas (context.json statistics)
+// months: Sep of 2002..2005 are m = 2, 14, 26, 38 (first month 2002-07); the "current" month is m = 50 (Sep 2006)
+function ctxOf(areas, zones, through = "2006-09") {
+  return { meta: { first: "2002-07", through }, areas, zones };
+}
+const area = (id, name, series, extra = {}) => ({
+  id, name, desig: "National Park", desig_type: "National", iucn: "II", departments: ["d1"], regions: ["chaco"],
+  m: series.map(([m]) => m), n: series.map(([, n]) => n), frp: series.map(([, n]) => n * 10), ...extra,
+});
+
+test("protectedSummary: ratio against the median of the same calendar month in previous years, missing months count as 0", () => {
+  // history for m = 50: m 38 -> 10, m 26 -> missing (0), m 14 -> 30, m 2 -> 20 => median of [10, 0, 30, 20] = 15
+  const a = area("a", "A", [[2, 20], [14, 30], [38, 10], [50, 45]]);
+  const ctx = ctxOf([a], { paraguay: { m: [50], n: [45], frp: [450] }, chaco: { m: [50], n: [45], frp: [450] } });
+  const s = protectedSummary(ctx, "paraguay", 50, "count", 1, { classes: meta.classes, zoneValue: 90 });
+  assert.equal(s.inside, 45);
+  assert.equal(s.share, 0.5);
+  assert.deepEqual(s.areas, [{ id: "a", name: "A", desig: "National Park", value: 45, median: 15, ratio: 3, classId: "extreme", lowSignal: false }]);
+  // a median under lowSignalMedian keeps the ratio but flags it as not meaningful
+  const low = protectedSummary(ctx, "paraguay", 50, "count", 1, { classes: meta.classes, lowSignalMedian: 20 }).areas[0];
+  assert.deepEqual([low.ratio, low.lowSignal], [3, true]);
+});
+
+test("protectedSummary: a current month scales the median by coverage like verdict()", () => {
+  const a = area("a", "A", [[2, 20], [14, 20], [26, 20], [38, 20], [50, 10]]);
+  const ctx = ctxOf([a], { paraguay: { m: [50], n: [10], frp: [100] } });
+  const full = protectedSummary(ctx, "paraguay", 50, "count", 1).areas[0];
+  const half = protectedSummary(ctx, "paraguay", 50, "count", 0.5).areas[0];
+  assert.equal(full.median, 20); assert.equal(full.ratio, 0.5);
+  assert.equal(half.median, 10); assert.equal(half.ratio, 1); assert.equal(half.classId, "normal");
+  // same figures as verdict() on the same series
+  const series = new Float64Array(51); for (const [m, n] of [[2, 20], [14, 20], [26, 20], [38, 20], [50, 10]]) series[m] = n;
+  const v = verdict({ meta, nMonths: 51 }, series, 50, 0.5);
+  assert.equal(half.median, v.median); assert.equal(half.ratio, v.ratio); assert.equal(half.classId, v.class.id);
+});
+
+test("protectedSummary: an area without history or with a zero median has ratio null (not Infinity, not a class)", () => {
+  const young = area("y", "Young", [[5, 7]]);          // m = 5 < 12: no previous year at all
+  const zero = area("z", "Zero", [[50, 4]]);           // history months all 0
+  const ctx = ctxOf([young, zero], { paraguay: { m: [5, 50], n: [7, 4], frp: [70, 40] } });
+  const early = protectedSummary(ctx, "paraguay", 5).areas.find((x) => x.id === "y");
+  assert.deepEqual([early.median, early.ratio, early.classId, early.lowSignal], [null, null, null, true]);
+  const z = protectedSummary(ctx, "paraguay", 50).areas.find((x) => x.id === "z");
+  assert.deepEqual([z.value, z.median, z.ratio, z.classId], [4, 0, null, null]);
+});
+
+test("protectedSummary: null after meta.through and for a zone that is not in zones; the through month itself is served", () => {
+  const ctx = ctxOf([area("a", "A", [[49, 3]])], { paraguay: { m: [49], n: [3], frp: [30] } }, "2006-08");
+  assert.equal(protectedSummary(ctx, "paraguay", 50), null);       // 2006-09 is after through (2006-08 = 49)
+  assert.equal(protectedSummary(ctx, "paraguay", 49).inside, 3);
+  assert.equal(protectedSummary(ctx, "custom", 49), null);
+  assert.equal(protectedSummary(ctx, "caaguazu", 49), null);
+});
+
+test("protectedSummary: metric frp reads the frp series for inside, value and ratio (n would give other numbers)", () => {
+  // history for m = 50: m 38 -> 100 MW, m 26 -> 0, m 14 -> 300 MW, m 2 -> 200 MW => median of [100, 0, 300, 200] = 150 MW
+  const a = area("a", "A", [[2, 1], [14, 1], [38, 1], [50, 1]]);
+  a.frp = [200, 300, 100, 600];
+  const ctx = ctxOf([a], { paraguay: { m: [50], n: [1], frp: [600] } });
+  const s = protectedSummary(ctx, "paraguay", 50, "frp", 1, { zoneValue: 1200 });
+  assert.equal(s.inside, 600);
+  assert.equal(s.share, 0.5);
+  assert.deepEqual([s.areas[0].value, s.areas[0].median, s.areas[0].ratio, s.areas[0].classId], [600, 150, 4, "extreme"]);
+  assert.equal(protectedSummary(ctx, "paraguay", 50, "count").inside, 1); // the count metric is unaffected
+});
+
+test("protectedSummary: areas of a zone come from regions / departments, sorted by value, with repeated records merged", () => {
+  const dup = { m: [50], n: [8], frp: [80] };
+  const ctx = ctxOf([
+    area("1", "Big", [[50, 30]], { departments: ["d1", "d2"], regions: ["chaco"] }),
+    area("2", "Reserva doble", dup.m.map((m, i) => [m, dup.n[i]]), { departments: ["d2"], regions: ["chaco"] }),
+    area("3", "Reserva doble", dup.m.map((m, i) => [m, dup.n[i]]), { id: "3", departments: ["d2"], regions: ["chaco"] }), // identical record
+    area("4", "Oriental one", [[50, 5]], { departments: ["d3"], regions: ["oriental"] }),
+    area("5", "Quiet", [[2, 1]], { departments: ["d2"], regions: ["chaco"] }),
+  ], { paraguay: { m: [50], n: [40], frp: [0] }, chaco: { m: [50], n: [38], frp: [0] }, d2: { m: [50], n: [38], frp: [0] }, d3: { m: [50], n: [5], frp: [0] } });
+  const names = (z) => protectedSummary(ctx, z, 50).areas.map((a) => a.name);
+  assert.deepEqual(names("paraguay"), ["Big", "Reserva doble", "Oriental one", "Quiet"]);
+  assert.deepEqual(names("chaco"), ["Big", "Reserva doble", "Quiet"]);
+  assert.deepEqual(names("d2"), ["Big", "Reserva doble", "Quiet"]);
+  assert.deepEqual(names("d3"), ["Oriental one"]);
+  // the union is not the sum: areas overlap
+  const p = protectedSummary(ctx, "paraguay", 50);
+  assert.equal(p.inside, 40);
+  assert.equal(p.share, null);
+});
+
+test("protectedSummary: reads the real context.json (Paraguay, Sep 2024 and the through month)", () => {
+  const ctx = JSON.parse(readFileSync(new URL("../data/app/context.json", import.meta.url), "utf8"));
+  const sep24 = indexOf(meta, 2024, 9);
+  const s = protectedSummary(ctx, "paraguay", sep24, "count", 1, { classes: meta.classes });
+  // repeated records (same name and series) are shown once; areas with a different series stay
+  const distinct = new Set(ctx.areas.map((a) => JSON.stringify([a.name, a.m, a.n, a.frp])));
+  assert.ok(distinct.size < ctx.areas.length);
+  assert.equal(s.areas.length, distinct.size);
+  assert.ok(s.inside > 1000);
+  assert.ok(s.areas.every((a, i, l) => i === 0 || l[i - 1].value >= a.value));
+  const [ty, tm] = ctx.meta.through.split("-").map(Number);
+  assert.notEqual(protectedSummary(ctx, "paraguay", indexOf(meta, ty, tm)), null);
+  assert.equal(protectedSummary(ctx, "paraguay", indexOf(meta, ty, tm) + 1), null);
 });

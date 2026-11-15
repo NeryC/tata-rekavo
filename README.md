@@ -77,6 +77,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 | `gaps.json` | Detected sensor outages and the days filled |
 | `mask.json` | ~5 km country mask (cells with any hotspot in the Paraguay archives), used to clip API data |
 | `frp.json` | Experimental: harmonized Fire Radiative Power (MW per cell-month, VIIRS S-NPP-equivalent) on the `grid.json` cell and month index, with FRP factors, its own leave-one-year-out validation, error model and the `experimental` flag in `meta`. Cell entry: `[cell_index, month_indices[], frp_mw[]]` |
+| `context.json` | Fire statistics per protected area (WDPA / WD-OECM), built by `build-context`: sparse monthly series of hotspots (`n`) and Fire Radiative Power (`frp`, MW) for each area and for the union of the areas per zone (Paraguay, Chaco, Oriental, each department). Statistics only: it carries no geometry (a test checks it), so the WDPA data is shown but not redistributed. `meta.through` is the last month it covers |
 | `metrics.json` | Full validation results |
 | `validation.png` | Naive vs harmonized record + hold-out validation |
 
@@ -86,6 +87,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 `harmonized.js` implements everything the web app needs, with no dependencies:
 - `decodeGrid`, `cellsInPolygon`, `zoneSeries`
 - `verdict`, `monthCoverage`, `calendar`, `relativeError`
+- `protectedSummary` (fire inside protected areas from `context.json`)
 - `decodeBurnHistory`, `seriesToCSV`
 
 `test_contract.mjs` checks it against the pipeline output.
@@ -97,6 +99,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 - **Area:** Paraguay, the Chaco, the Oriental region, any of the 17 departments (from the ranking below), any polygon drawn on the map, or a point (latitude / longitude) with a radius.
 - **Verdict:** the selected month against the median of the same month in previous years, with its error band. A month still in progress is compared with the same share of a typical month.
 - **Where is fire abnormal?** Every department ranked for the selected month by its ratio to its own usual level, with the error band, the verdict class and the hotspot count. Click one to make it the area: the map frames it and the verdict, calendar and charts follow. A month in progress uses the same partial-month scaling as the verdict. Departments whose usual count for that month is under 10 hotspots (or with no history) are not given a ratio; they are listed last as "low signal". On phones the list is folded. A department link keeps the selection (`z=department&dep=<id>`). If `departments.json` cannot be loaded the panel is hidden and the rest of the app is unaffected.
+- **Protected areas:** under the verdict, when at least 1 hotspot (or 1 MW) of the month falls inside protected areas, a line says how many and what share of the month, and names up to three areas (with their class when high or extreme). A folded "Protected areas" block lists every area that overlaps the selected zone with its value, ratio to its own usual level and class. Areas overlap, so the rows can add up to more than the total, which counts each hotspot once; an area that crosses the zone's limits is shown whole. It works for Paraguay, the regions and the departments, not for a custom area, and only up to the month `context.json` covers (later months say so instead of showing old figures). Only statistics are shown, never WDPA geometry. If `context.json` cannot be loaded the block is hidden. Next step: the same for indigenous territories.
 - **Date range analytics:** total hotspots (± error), ratio to the usual for those months, peak month, months above or below normal, and hotspots in new places. Presets: this year, last 12 months, fire season (Jul–Oct), all.
 - **Burning calendar:** years × months, in two modes.
   - *vs normal* (diverging, ratio to the usual level).
@@ -156,6 +159,10 @@ Never commit the MAP_KEY. Pass it through the environment only.
 
 - **geoBoundaries** gbOpen, Paraguay ADM1 (departments): https://www.geoboundaries.org/ (API: https://www.geoboundaries.org/api/current/gbOpen/PRY/ADM1/). Licence: CC BY 4.0. Retrieved 2026-11-14. Original source: DGEEC Paraguay (Dirección General de Estadística, Encuestas y Censos). Used for the department ranking and area selection; boundaries are simplified and Asunción is merged into Central.
   Citation: Runfola, D. et al. (2020). geoBoundaries: A global database of political administrative boundaries. *PLoS ONE* 15(4): e0231866. https://doi.org/10.1371/journal.pone.0231866
+
+- **WDPA / WD-OECM** (World Database on Protected Areas and on Other Effective Area-based Conservation Measures), Paraguay: https://www.protectedplanet.net/country/PRY. Retrieved 2026-11-14. Used for the protected-areas figures in the verdict. Only fire statistics per area are published (`data/app/context.json`); the WDPA geometry is not distributed.
+  Citation: UNEP-WCMC and IUCN (2026), Protected Planet: The World Database on Protected Areas (WDPA) and World Database on Other Effective Area-based Conservation Measures (WD-OECM) [Online], November 2026, Cambridge, UK: UNEP-WCMC and IUCN. Available at: www.protectedplanet.net.
+- **Indigenous territories:** not included yet. Next step: add them as a second context layer, with fire statistics only, if a source with terms that allow it is found.
 
 ## Use of AI
 

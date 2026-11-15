@@ -689,7 +689,10 @@ def test_context_real_data():
     if not cj.exists():
         pytest.skip("data/app/context.json not present")
     assert cj.stat().st_size < 1_000_000
-    ctx = json.loads(cj.read_text(encoding="utf-8"))
+    text = cj.read_text(encoding="utf-8")
+    assert "\ufffd" not in text          # no replacement characters from a bad decode
+    assert "\u00d1uguazu" in text        # accents survive (the source had UTF-8 read as latin-1)
+    ctx = json.loads(text)
     _walk(ctx)
     meta = ctx["meta"]
     assert meta["source"].startswith("WDPA/WD-OECM") and "no WDPA geometry" in meta["terms"]

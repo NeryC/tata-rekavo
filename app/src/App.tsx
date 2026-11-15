@@ -6,16 +6,17 @@ import YearChart from "./YearChart";
 import SeasonChart from "./SeasonChart";
 import ValidationPanel from "./ValidationPanel";
 import DepartmentRanking from "./DepartmentRanking";
+import ProtectedAreas from "./ProtectedAreas";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadData, loadDepartments, loadFrp, loadSeason, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
+  HOTSPOT_HEADER, loadContext, loadData, loadDepartments, loadFrp, loadSeason, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
 } from "./data";
 import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
 import { indexToMonth, planRestore } from "./shareRestore";
-import type { Grid } from "@core";
+import type { ContextFile, Grid } from "@core";
 import type { SeasonFile } from "./season";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang, type Metric } from "./i18n";
 
@@ -26,6 +27,8 @@ const CLASS_STYLE: Record<string, { icon: string }> = {
 const REPO = "https://github.com/NeryC/tata-rekavo";
 const GEOBOUNDARIES = "https://www.geoboundaries.org/";
 const GEOBOUNDARIES_RETRIEVED = "2026-11-14"; // shown when departments.json did not load
+const WDPA_URL = "https://www.protectedplanet.net/country/PRY";
+const WDPA_RETRIEVED = "2026-11-14";
 const MAX_ROWS = 1_500_000;
 // a typical month under 100 MW is too little fire to rank by ratio (counts use 10 hotspots, MW run about ten times higher)
 const FRP_LOW_SIGNAL_MEDIAN = 100;
@@ -47,6 +50,7 @@ export default function App() {
   const [departments, setDepartments] = useState<DepartmentsFile | null>(null); // null until loaded, or when it failed
   const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [season, setSeason] = useState<SeasonFile | null>(null); // null until loaded, or when it failed: the chart stays hidden
+  const [context, setContext] = useState<ContextFile | null>(null); // protected-area statistics; null until loaded, or when it failed: the block stays hidden
   const [polygon, setPolygon] = useState<number[][] | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
   const [coordsOpen, setCoordsOpen] = useState(false);
@@ -71,6 +75,7 @@ export default function App() {
     const depsLoad = loadDepartments(); // lazy and optional: starts with the grid, never blocks it
     void depsLoad.then(setDepartments);
     void loadSeason().then(setSeason);
+    void loadContext().then(setContext);
     loadData().then(async (d) => {
       // a shared department link has to wait for departments.json, or it would restore as Paraguay
       const link = decodeState(window.location.search);
@@ -281,6 +286,16 @@ export default function App() {
   const cov = coverage(month);
   const v = H.verdict(grid, series.harmonized, month, cov);
   const cls = CLASS_STYLE[v.class.id];
+  // protected areas: figures only for Paraguay, the regions and the departments, and only up to the month the data reaches
+  const protZone = zoneKind === "department" ? department?.id ?? null : zoneKind === "custom" ? null : zoneKind;
+  const protThrough = context ? context.meta.through.split("-").map(Number) : null;
+  const protThroughIdx = protThrough ? H.indexOf(meta, protThrough[0], protThrough[1]) : -1;
+  const protSummary = context && protZone && !v.noData
+    ? H.protectedSummary(context, protZone, month, active, cov, { classes: meta.classes, zoneValue: v.value, lowSignalMedian: active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : 10 }) : null;
+  const protNote = !context || v.noData ? null : zoneKind === "custom" ? "custom" : month > protThroughIdx ? "late" : null;
+  const protTop = protSummary ? protSummary.areas.filter((a) => a.value >= 0.5).slice(0, 3) : [];
+  const protShare = protSummary?.share != null
+    ? Math.round(protSummary.share * 100).toLocaleString(lang === "es" ? "es-PY" : "en-US") : null;
   const ml = (m: number) => { const o = H.monthOf(meta, m); return i18n.monthLabel(o.year, o.month); };
   const { year: selYear, month: selMonth } = H.monthOf(meta, month);
   const monthLabel = ml(month);
@@ -470,6 +485,16 @@ export default function App() {
               </p>
               {v.partial && <p className="v-tag">{t.partialTag(Math.round(cov * 100))}</p>}
               <p className="v-src">{t.source} {sourceOf(meta, data.current, month, i18n)}</p>
+              {protSummary && protSummary.inside >= 1 && (
+                <p className="v-prot">
+                  {t.protLine(num(protSummary.inside), protShare)}.
+                  {protTop.length > 0 && <> {t.protMost}{" "}{protTop.map((a, i) => (
+                    <span key={a.id}>{i > 0 && ", "}{a.name}{!a.lowSignal && (a.classId === "high" || a.classId === "extreme") && a.ratio !== null
+                      && <>: {t.classes[a.classId].toLowerCase()} ×{i18n.ratio(a.ratio)}</>}</span>
+                  ))}.</>}
+                </p>
+              )}
+              {protNote === "late" && <p className="v-prot">{t.protLate(ml(protThroughIdx))}</p>}
               </>)}
               <details>
                 <summary>{t.whatIsHotspot}</summary>
@@ -478,6 +503,11 @@ export default function App() {
               </div>
               <ValidationPanel meta={meta} />
             </section>
+
+            {context && (protSummary || protNote) && (
+              <ProtectedAreas summary={protSummary} note={protNote} zoneLabel={zoneLabel} source={context.meta.source} coverage={cov}
+                throughLabel={ml(protThroughIdx)} />
+            )}
 
             {ranking && ranking.length > 0 && (
               <DepartmentRanking rows={ranking} monthLabel={monthLabel} coverage={cov} selectedId={zoneKind === "department" ? departmentId : null}
@@ -597,6 +627,11 @@ export default function App() {
                 <p>{t.footBoundaries(departments?.meta.retrieved ?? GEOBOUNDARIES_RETRIEVED)}{" "}
                   <a href={GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
                 </p>
+                {context && (
+                  <p>{t.footWdpa(context.meta.citation, WDPA_RETRIEVED)}{" "}
+                    <a href={WDPA_URL} target="_blank" rel="noreferrer">{WDPA_URL}</a>. {t.footWdpaTerms}
+                  </p>
+                )}
               </details>
               <p>{t.footHotspot}</p>
             </footer>

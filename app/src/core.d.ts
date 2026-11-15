@@ -57,6 +57,37 @@ export function departmentRanking(grid: Grid, departments: DepartmentDef[], m: n
 export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null; p90Pct?: number }
 export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
 export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;
+/** data/app/context.json: fire statistics per protected area (WDPA); sparse monthly series, no geometry. */
+export interface ProtectedSeries { m: number[]; n: number[]; frp: number[] }
+export interface ProtectedAreaRecord extends ProtectedSeries {
+  id: string; name: string; desig: string; desig_type: string; iucn: string;
+  departments: string[]; regions: ("chaco" | "oriental")[];
+}
+export interface ContextFile {
+  meta: { source: string; citation: string; terms: string; through: string; first: string; generated: string; unit: string; overlap_note: string };
+  areas: ProtectedAreaRecord[];
+  zones: Record<string, ProtectedSeries>;
+}
+export interface ProtectedAreaRow {
+  id: string; name: string; desig: string; value: number;
+  /** median of the same calendar month in previous years, scaled by coverage; null when the area has no previous year */
+  median: number | null;
+  /** null when there is no history or the median is 0 */
+  ratio: number | null;
+  classId: ClassDef["id"] | null;
+  /** ratio is null, or the median is below opts.lowSignalMedian: do not show ratio or class */
+  lowSignal: boolean;
+}
+export interface ProtectedSummary {
+  /** the zone's value for the month, union of the areas (each hotspot once); the areas can add up to more */
+  inside: number;
+  /** inside / opts.zoneValue, null when no zoneValue was given */
+  share: number | null;
+  areas: ProtectedAreaRow[];
+}
+/** null for a zone without figures (custom area) and for a month later than context.meta.through. */
+export function protectedSummary(context: ContextFile, zoneId: string, m: number, metric?: "count" | "frp", coverage?: number,
+  opts?: { classes?: ClassDef[]; zoneValue?: number; lowSignalMedian?: number }): ProtectedSummary | null;
 export function calendar(grid: Grid, series: Float64Array): Calendar;
 export function seriesToCSV(grid: Grid, s: Series, opts?: { metric?: "count" | "frp" }): string;
 
