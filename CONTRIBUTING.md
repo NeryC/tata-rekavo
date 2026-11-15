@@ -94,4 +94,5 @@ npm --prefix app run dev                         # probar en escritorio y a 375 
 - Los commits y PR no llevan coautorías ni referencias a herramientas de IA.
 - Toda fuente de datos nueva se declara en "Space Agency Partner & Other Data" (README y footer de la app), con nombre, URL, licencia y fecha.
 - **WDPA (áreas protegidas):** solo se publican estadísticas de fuego por área, **nunca la geometría**, porque la licencia lo prohíbe.
+- **LandMark (territorios indígenas):** igual, solo estadísticas por territorio, **nunca la geometría** (licencia CC BY-SA 4.0, uso responsable); se declara con su cita y contribuyentes.
 - Ningún mes va como índice en URLs ni en archivos nuevos: se escribe `YYYY-MM`.

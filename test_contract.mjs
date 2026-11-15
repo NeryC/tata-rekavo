@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as H from "./harmonized.js";
 import { buildIndex } from "./countries_index.mjs";
+import { validateContext, validateIndigenous } from "./app/src/contextCheck.ts";
 
 const dir = process.argv[2] || "data/app";
 const gridJson = JSON.parse(readFileSync(join(dir, "grid.json"), "utf8"));
@@ -187,6 +188,24 @@ if (index) {
   const want = buildIndex(config, dir);
   check(JSON.stringify(index) === JSON.stringify(want), `countries.json index in sync with countries.json (${index.countries.map((c) => c.iso3).join(", ")}); regenerate with node countries_index.mjs`);
   check(index.countries.some((c) => c.iso3 === index.default && c.path === ""), `default country ${index.default} is served from the site root`);
+}
+
+// 13. fire statistics per protected area (context.json) and per indigenous territory (indigenous.json), optional files:
+// they must validate as the app reads them, hold only statistics (no geometry) and cover this country's zones
+const readOptional = (f) => { try { return JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { return null; } };
+const GEOMETRY_KEYS = new Set(["geometry", "coordinates", "bbox", "centroid", "lat", "lon", "latitude", "longitude", "lng"]);
+const hasGeometry = (j) => [j, j.meta, ...j.areas].some((o) => Object.keys(o).some((k) => GEOMETRY_KEYS.has(k.toLowerCase())));
+for (const [file, validate, label] of [["context.json", validateContext, "protected areas"], ["indigenous.json", validateIndigenous, "indigenous territories"]]) {
+  const j = readOptional(file);
+  if (!j) { console.log(`     note: ${file} not found in ${dir} (the app shows no ${label} block)`); continue; }
+  check(validate(j) !== null, `${file} validates as the app reads it (${j.areas.length} ${label})`);
+  check(!hasGeometry(j), `${file} holds statistics only: no geometry, bbox or centroid key`);
+  const known = new Set([countryArea, ...(countryArea === "paraguay" ? ["chaco", "oriental"] : gridJson.meta.regions?.names ?? []), ...(readOptional("departments.json")?.departments ?? []).map((d) => d.id)]);
+  check(Object.keys(j.zones).every((z) => known.has(z)) && Object.keys(j.zones)[0] === countryArea, `${file} zones are this country's zones (country first: ${countryArea})`);
+  const through = j.meta.through.split("-").map(Number);
+  const tm = H.indexOf(grid.meta, through[0], through[1]);
+  check(tm >= 0 && tm < grid.nMonths, `${file} ends in ${j.meta.through}, a month of the record`);
+  if (file === "indigenous.json") check(j.meta.license === "CC BY-SA 4.0" && Array.isArray(j.meta.contributors) && j.meta.contributors.length > 0 && j.areas.length > 0, `${file} names its license (${j.meta.license}) and ${j.meta.contributors.length} contributors`);
 }
 
 process.exit(fails ? 1 : 0);

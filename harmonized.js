@@ -329,13 +329,15 @@ function sparseAt(series, field, m) {
 /**
  * Fire inside protected areas for month m, from context.json (statistics per area, no geometry).
  *
- * - zoneId: "paraguay" | "chaco" | "oriental" | a department id (a key of context.zones). Returns null for any other id
+ * - zoneId: the country zone (opts.countryZone, default "paraguay"), a region id ("chaco", "oriental", a biome id) or a department id
+ *   (a key of context.zones). Returns null for any other id
  *   (a custom area has no protected-area figures) and when m is later than context.meta.through: the figures stop there
  *   and are never reused for a later month.
  * - metric: "count" uses n (hotspots), "frp" uses frp (MW).
  * - Per-area values for a department or region zone come from the area's `by_zone[zoneId]` series (hotspots inside the area AND inside
- *   that zone), so an area that spreads over several zones only contributes its fire in this one; a zone missing from by_zone is 0.
- *   For "paraguay" the area's whole series is used.
+ *   that zone), so an area that spreads over several zones only contributes its fire in this one; a zone missing from by_zone is 0
+ *   (unless context.meta.by_zone_default is "whole", as in indigenous.json: then it has the area's whole series).
+ *   For the country zone the area's whole series is used.
  * - inside: the zone's value for that month from context.zones, which is the UNION of the areas (each hotspot once).
  *   Areas overlap and hotspots count in every area that holds them, so the areas' values can add up to more than inside.
  * - areas: the areas that overlap the zone (all for paraguay; by `regions` for chaco/oriental, by `departments` for a department),
@@ -347,19 +349,23 @@ function sparseAt(series, field, m) {
  *   month for a ratio to mean much (a median of 0.4 hotspots makes any month look x10). Callers should not show ratio/class then.
  * - opts.classes: class thresholds for classId (grid.json meta.classes; default 0.5 / 1.5 / 3).
  * - opts.zoneValue: the zone's value for the same month in the same unit (from verdict); share = inside / zoneValue, null without it.
+ * - opts.countryZone: the id of the whole-country zone (the country's `area`; "paraguay" by default).
+ * The same function serves indigenous.json (territories instead of protected areas): rows then also carry category and ethnicity.
  */
-export function protectedSummary(context, zoneId, m, metric = "count", coverage = 1, { classes = DEFAULT_CLASSES, zoneValue, lowSignalMedian = 0 } = {}) {
+export function protectedSummary(context, zoneId, m, metric = "count", coverage = 1, { classes = DEFAULT_CLASSES, zoneValue, lowSignalMedian = 0, countryZone = "paraguay" } = {}) {
   const zone = context?.zones?.[zoneId];
   if (!zone || !Array.isArray(context.areas)) return null;
   const [ty, tm] = context.meta.through.split("-").map(Number);
   if (m > indexOf({ months: { first: context.meta.first } }, ty, tm)) return null;
   const field = metric === "frp" ? "frp" : "n";
+  // meta.by_zone_default = "whole" (indigenous.json): a listed zone without a by_zone entry has the area's whole series
+  const whole = context.meta.by_zone_default === "whole";
   const inside = sparseAt(zone, field, m);
   const cls = { classes };
   const areas = uniqueAreas(context)
-    .filter((a) => zoneId === "paraguay" || (zoneId === "chaco" || zoneId === "oriental" ? a.regions.includes(zoneId) : a.departments.includes(zoneId)))
+    .filter((a) => zoneId === countryZone || a.regions.includes(zoneId) || a.departments.includes(zoneId))
     .map((a) => {
-      const ser = zoneId === "paraguay" ? a : (a.by_zone?.[zoneId] ?? NO_SERIES);
+      const ser = zoneId === countryZone || (whole && !a.by_zone?.[zoneId]) ? a : (a.by_zone?.[zoneId] ?? NO_SERIES);
       const value = sparseAt(ser, field, m);
       const history = [];
       for (let k = m - 12; k >= 0; k -= 12) history.push(sparseAt(ser, field, k));
@@ -368,6 +374,8 @@ export function protectedSummary(context, zoneId, m, metric = "count", coverage 
       return {
         id: a.id, name: a.name, desig: a.desig, value, median: med, ratio, classId: ratio === null ? null : classify(cls, ratio).id,
         lowSignal: ratio === null || !(med >= lowSignalMedian),
+        // indigenous territories: what kind of land it is and the people it belongs to (absent for protected areas)
+        ...(a.category ? { category: a.category } : {}), ...(a.ethnicity ? { ethnicity: a.ethnicity } : {}),
       };
     })
     .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));

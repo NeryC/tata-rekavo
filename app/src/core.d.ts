@@ -60,12 +60,17 @@ export interface ValidationRow { area: string; mdapePct: number; classAgreementP
 export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
 /** countryArea: the country's area id, the key of the country row in frp.json (default "paraguay") */
 export function validationSummary(meta: Partial<GridMeta>, countryArea?: string): ValidationSummary;
-/** data/app/context.json: fire statistics per protected area (WDPA); sparse monthly series, no geometry. */
+/** data/app/context.json (protected areas, WDPA) and data/app/indigenous.json (indigenous territories, LandMark): fire statistics per area; sparse monthly series, no geometry. */
 export interface ProtectedSeries { m: number[]; n: number[]; frp: number[] }
 export interface ProtectedAreaRecord extends ProtectedSeries {
-  id: string; name: string; desig: string; desig_type: string; iucn: string;
-  departments: string[]; regions: ("chaco" | "oriental")[];
-  /** the area's own series restricted to one department or region (inside the area AND the zone); only zones where it is not empty */
+  id: string; name: string;
+  /** protected areas only (WDPA) */
+  desig?: string; desig_type?: string; iucn?: string;
+  /** indigenous territories only (LandMark): "Indigenous" | "Community", the kind of land and the people it belongs to (absent when unknown) */
+  identity?: string; category?: string; ethnicity?: string;
+  departments: string[]; regions: string[];
+  /** the area's own series restricted to one department or region (inside the area AND the zone); only zones where it is not empty
+   *  (context.json), or only zones where it differs from its whole series (indigenous.json: meta.by_zone_default "whole") */
   by_zone: Record<string, ProtectedSeries>;
 }
 export interface ContextFile {
@@ -73,14 +78,18 @@ export interface ContextFile {
     source: string; citation: string; terms: string; through: string; first: string; generated: string; unit: string; overlap_note: string;
     /** last day of data behind the figures, "YYYY-MM-DD" */
     through_day?: string;
-    /** when the WDPA release was downloaded, "YYYY-MM-DD" */
+    /** when the WDPA / LandMark release was downloaded, "YYYY-MM-DD" */
     retrieved: string;
+    /** indigenous.json only: "CC BY-SA 4.0", the data contributors credited by LandMark, and "whole" = a listed zone without a by_zone entry has the area's whole series */
+    license?: string; contributors?: string[]; layer?: "indigenous"; by_zone_default?: "whole";
   };
   areas: ProtectedAreaRecord[];
   zones: Record<string, ProtectedSeries>;
 }
 export interface ProtectedAreaRow {
-  id: string; name: string; desig: string; value: number;
+  id: string; name: string; desig?: string; value: number;
+  /** indigenous territories: kind of land and people (absent for protected areas and when unknown) */
+  category?: string; ethnicity?: string;
   /** median of the same calendar month in previous years, scaled by coverage; null when the area has no previous year */
   median: number | null;
   /** null when there is no history or the median is 0 */
@@ -96,9 +105,9 @@ export interface ProtectedSummary {
   share: number | null;
   areas: ProtectedAreaRow[];
 }
-/** null for a zone without figures (custom area) and for a month later than context.meta.through. */
+/** null for a zone without figures (custom area) and for a month later than context.meta.through. countryZone: the id of the whole-country zone (default "paraguay"). */
 export function protectedSummary(context: ContextFile, zoneId: string, m: number, metric?: "count" | "frp", coverage?: number,
-  opts?: { classes?: ClassDef[]; zoneValue?: number; lowSignalMedian?: number }): ProtectedSummary | null;
+  opts?: { classes?: ClassDef[]; zoneValue?: number; lowSignalMedian?: number; countryZone?: string }): ProtectedSummary | null;
 export function calendar(grid: Grid, series: Float64Array): Calendar;
 export function seriesToCSV(grid: Grid, s: Series, opts?: { metric?: "count" | "frp" }): string;
 

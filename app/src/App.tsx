@@ -9,12 +9,13 @@ import ProtectedAreas from "./ProtectedAreas";
 import Glance, { type CaseLink } from "./Glance";
 import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
+import { layerNote, shareLabel, topRows } from "./layerFigures";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadSeason, loadSummary, PARAGUAY, regionPresets, sourceOf,
+  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadIndigenous, loadSeason, loadSummary, PARAGUAY, regionPresets, sourceOf,
   type AppData, type CountryInfo, type DepartmentsFile,
 } from "./data";
 import { countryOf, decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
@@ -35,6 +36,7 @@ const REPO = "https://github.com/NeryC/tata-rekavo";
 const GEOBOUNDARIES = "https://www.geoboundaries.org/";
 const GEOBOUNDARIES_RETRIEVED = "2026-11-14"; // shown when departments.json did not load
 const WDPA_URL = "https://www.protectedplanet.net/country/PRY";
+const LANDMARK_URL = "https://landmarkmap.org";
 const MAX_ROWS = 1_500_000;
 // a typical month under 100 MW is too little fire to rank by ratio (counts use 10 hotspots, MW run about ten times higher)
 const FRP_LOW_SIGNAL_MEDIAN = 100;
@@ -99,6 +101,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [season, setSeason] = useState<SeasonFile | null>(null); // null until loaded, or when it failed: the chart stays hidden
   const [context, setContext] = useState<ContextFile | null>(null); // protected-area statistics; null until loaded, or when it failed: the block stays hidden
+  const [indigenous, setIndigenous] = useState<ContextFile | null>(null); // indigenous-territory statistics: same, for the countries that ship indigenous.json
   const [polygon, setPolygon] = useState<number[][] | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
   const [coordsOpen, setCoordsOpen] = useState(false);
@@ -132,6 +135,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     void depsLoad.then(setDepartments);
     void loadSeason(path).then(setSeason);
     if (country.files?.context !== false) void loadContext(path).then(setContext); // protected areas: Paraguay only
+    if (country.files?.indigenous !== false) void loadIndigenous(path).then(setIndigenous); // indigenous territories: not Uruguay
     let alive = true;
     loadData(path, country.iso3, country.files).then(async ({ data: d, extras }) => {
       // a shared department link has to wait for departments.json, or it would restore as the whole country
@@ -394,23 +398,31 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const cov = coverage(month);
   const v = H.verdict(grid, series.harmonized, month, cov);
   const cls = CLASS_STYLE[v.class.id];
-  // protected areas (context.json, Paraguay only): figures for the country, the regions and the departments, and only up to
-  // the month the data reaches
+  // protected areas (context.json, Paraguay only) and indigenous territories (indigenous.json): figures for the country, the regions and
+  // the departments, and only up to the month the data reaches
   const protZone = zoneKind === "department" ? department?.id ?? null : zoneKind === "custom" ? null : zoneKind;
-  const protThrough = context ? context.meta.through.split("-").map(Number) : null;
-  const protThroughIdx = protThrough ? H.indexOf(meta, protThrough[0], protThrough[1]) : -1;
-  // the daily workflow refreshes current.json but cannot rebuild context.json: figures of the last month can lag behind the data shown
   const lastHotspotDate = data.hotspots.reduce<string | null>((mx, h) => (mx === null || h.date > mx ? h.date : mx), null);
-  const protStale = !!context && month === protThroughIdx && isContextStale(context, lastHotspotDate, data.current?.generated);
-  // the last month's figures need the hotspots to tell whether they are stale: wait for the second stage
-  const protPending = month === protThroughIdx && !hotspotsReady;
-  const protSummary = context && protZone && !v.noData && !protStale && !protPending
-    ? H.protectedSummary(context, protZone, month, active, cov, { classes: meta.classes, zoneValue: v.value, lowSignalMedian: active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : 10 }) : null;
-  const protNote = !context || v.noData || protPending ? null : zoneKind === "custom" ? "custom" : month > protThroughIdx ? "late" : protStale ? "stale" : null;
-  const protTop = protSummary ? protSummary.areas.filter((a) => a.value >= 0.5).slice(0, 3) : [];
-  const protPct = protSummary?.share != null ? protSummary.share * 100 : null;
-  // a share under 1 % must not round to "0 %" next to a non-zero count
-  const protShare = protPct === null ? null : protPct > 0 && protPct < 1 ? "<1" : Math.round(protPct).toLocaleString(lang === "es" ? "es-PY" : "en-US");
+  const layerFigures = (ctx: ContextFile | null) => {
+    const through = ctx ? ctx.meta.through.split("-").map(Number) : null;
+    const throughIdx = through ? H.indexOf(meta, through[0], through[1]) : -1;
+    // the daily workflow refreshes current.json but cannot rebuild these files: figures of the last month can lag behind the data shown
+    const stale = !!ctx && month === throughIdx && isContextStale(ctx, lastHotspotDate, data.current?.generated);
+    // the last month's figures need the hotspots to tell whether they are stale: wait for the second stage
+    const pending = month === throughIdx && !hotspotsReady;
+    const summary = ctx && protZone && !v.noData && !stale && !pending
+      ? H.protectedSummary(ctx, protZone, month, active, cov, { classes: meta.classes, zoneValue: v.value, countryZone: country.area, lowSignalMedian: active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : 10 }) : null;
+    const note = layerNote({ loaded: !!ctx, noData: v.noData, pending, custom: zoneKind === "custom", month, throughIdx, stale });
+    // a share under 1 % must not round to "0 %" next to a non-zero count
+    return { throughIdx, summary, note, top: topRows(summary?.areas), share: shareLabel(summary?.share, lang === "es" ? "es-PY" : "en-US") };
+  };
+  const prot = layerFigures(context);
+  const ind = layerFigures(indigenous);
+  const asOfOf = (c: ContextFile) => c.meta.through_day ?? c.meta.generated.slice(0, 10);
+  // "A, B: high ×2.1, C": the areas with the most fire, with their class when it is high or extreme
+  const mostIn = (rows: NonNullable<typeof prot.summary>["areas"]) => rows.map((a, i) => (
+    <span key={a.id}>{i > 0 && ", "}{a.name}{!a.lowSignal && (a.classId === "high" || a.classId === "extreme") && a.ratio !== null
+      && <>: {t.classes[a.classId].toLowerCase()} ×{i18n.ratio(a.ratio)}</>}</span>
+  ));
   const ml = (m: number) => { const o = H.monthOf(meta, m); return i18n.monthLabel(o.year, o.month); };
   const { year: selYear, month: selMonth } = H.monthOf(meta, month);
   const monthLabel = ml(month);
@@ -648,17 +660,22 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               </p>
               {v.partial && <p className="v-tag">{t.partialTag(Math.round(cov * 100))}</p>}
               <p className="v-src">{t.source} {sourceOf(meta, data.current, month, i18n)}</p>
-              {protSummary && protSummary.inside >= 1 && (
+              {prot.summary && prot.summary.inside >= 1 && (
                 <p className="v-prot">
-                  {t.protLine(num(protSummary.inside), protShare)}.
-                  {protTop.length > 0 && <> {t.protMost}{" "}{protTop.map((a, i) => (
-                    <span key={a.id}>{i > 0 && ", "}{a.name}{!a.lowSignal && (a.classId === "high" || a.classId === "extreme") && a.ratio !== null
-                      && <>: {t.classes[a.classId].toLowerCase()} ×{i18n.ratio(a.ratio)}</>}</span>
-                  ))}.</>}
+                  {t.protLine(num(prot.summary.inside), prot.share)}.
+                  {prot.top.length > 0 && <> {t.protMost}{" "}{mostIn(prot.top)}.</>}
                 </p>
               )}
-              {protNote === "late" && <p className="v-prot">{t.protLate(ml(protThroughIdx))}</p>}
-              {protNote === "stale" && context && <p className="v-prot">{t.protStale(context.meta.through_day ?? context.meta.generated.slice(0, 10))}</p>}
+              {prot.note === "late" && <p className="v-prot">{t.protLate(ml(prot.throughIdx))}</p>}
+              {prot.note === "stale" && context && <p className="v-prot">{t.protStale(asOfOf(context))}</p>}
+              {ind.summary && ind.summary.inside >= 1 && (
+                <p className="v-prot">
+                  {t.indLine(num(ind.summary.inside), ind.share)}.
+                  {ind.top.length > 0 && <> {t.indMost}{" "}{mostIn(ind.top)}.</>}
+                </p>
+              )}
+              {ind.note === "late" && <p className="v-prot">{t.indLate(ml(ind.throughIdx))}</p>}
+              {ind.note === "stale" && indigenous && <p className="v-prot">{t.indStale(asOfOf(indigenous))}</p>}
               </>)}
               <details>
                 <summary>{t.whatIsHotspot}</summary>
@@ -668,9 +685,14 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               <ValidationPanel meta={meta} countryArea={country.area} countryName={countryName} path={path} areaName={zoneName} />
             </section>
 
-            {context && (protSummary || protNote) && (
-              <ProtectedAreas summary={protSummary} note={protNote} zoneLabel={zoneLabel} source={context.meta.source} coverage={cov}
-                throughLabel={ml(protThroughIdx)} asOf={context.meta.through_day ?? context.meta.generated.slice(0, 10)} />
+            {context && (prot.summary || prot.note) && (
+              <ProtectedAreas summary={prot.summary} note={prot.note} zoneLabel={zoneLabel} source={context.meta.source} coverage={cov}
+                throughLabel={ml(prot.throughIdx)} asOf={asOfOf(context)} />
+            )}
+
+            {indigenous && (ind.summary || ind.note) && (
+              <ProtectedAreas layer="indigenous" summary={ind.summary} note={ind.note} zoneLabel={zoneLabel} source={indigenous.meta.source} coverage={cov}
+                throughLabel={ml(ind.throughIdx)} asOf={asOfOf(indigenous)} />
             )}
 
             {ranking && ranking.length > 0 && (
@@ -804,7 +826,11 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                     <a href={WDPA_URL} target="_blank" rel="noreferrer">{WDPA_URL}</a>. {t.footWdpaTerms}
                   </p>
                 )}
-                <p>{t.footIndigenous}</p>
+                {indigenous && (
+                  <p>{t.footLandmark(indigenous.meta.citation, indigenous.meta.license ?? "", indigenous.meta.retrieved)}{" "}
+                    <a href={LANDMARK_URL} target="_blank" rel="noreferrer">landmarkmap.org</a>. {t.footLandmarkTerms(indigenous.meta.contributors ?? [])}
+                  </p>
+                )}
               </details>
               <p>{t.footHotspot}</p>
             </footer>

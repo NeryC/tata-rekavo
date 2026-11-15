@@ -127,6 +127,35 @@ Several designations overlap (Ramsar sites, UNESCO-MAB biosphere reserves over n
 An area lists a department / region when at least one 0.1-degree grid-cell centre of it lies inside the area or at least one hotspot
 inside the area falls in it.
 
+## LandMark indigenous territories (private, not committed) and `data/app/**/indigenous.json`
+
+Indigenous Peoples' and Local Community Lands and Territories, LandMark v202606 (polygon layer, 327,379 polygons worldwide; Web Mercator, EPSG:3857).
+
+- Source: https://landmarkmap.org (download of "Indigenous Peoples' and Local Community Lands and Territories"), unzipped to
+  `data/raw/ext/landmark/Indigenous_comm_lands_public_202606/` (`shp/LandMark_IP_LC_poly_public_v202606.shp` + `.dbf`, 1.8 GB each). Retrieved: 2026-11-15.
+- License: CC BY-SA 4.0. LandMark Terms of Service (26 Aug 2024): content may be copied, adapted and distributed under CC BY-SA 4.0; use it responsibly,
+  protecting the rights of Indigenous Peoples. `indigenous.json` is distributed under the same license.
+- Citation (required): LandMark: The Global Platform of Indigenous and Community Lands (2026), Indigenous Peoples' and Local Community Lands and
+  Territories, v202606, https://landmarkmap.org
+- Only fire statistics per territory (plus the id, name, identity, category and ethnicity) are published. The polygons, bounding boxes and centroids are NOT
+  in this repository or the site: `data/raw/ext/` and `data/raw/ext/derived/` are gitignored, and tests check that `indigenous.json` has no geometry key.
+- Kept: `download = Yes` and `layer` in (`Indigenous Lands`, `Community Lands`): Paraguay 678, Bolivia 321, Peru 2,530, Ecuador 754 territories.
+  Uruguay has none in LandMark, so it ships no file and the app asks for none.
+
+Steps, per country (PRY, BOL, PER, ECU), with the FIRMS archives in `data/raw` (Paraguay) or `data/raw/<ISO3>` and `departments.json` / `current_hotspots.csv` up to date:
+
+```
+python firms_pipeline.py extract-landmark --country BOL
+python firms_pipeline.py build-context --layer indigenous --country BOL --data data/raw/BOL --out data/app/BOL
+```
+
+`extract-landmark` streams the shapefile (the DBF is read record by record, then only the country's shapes), converts Web Mercator metres to lon/lat and
+writes `data/raw/ext/derived/indigenous_<ISO3>.geojson` (id = `landmark_i`, name, identity, category, ethnicity = `ethncty_1`, data_src, data_ctrb). The DBF says
+UTF-8 but some strings are latin-1: each string is decoded as UTF-8 when valid and as latin-1 otherwise. `build-context --layer indigenous` uses the same method
+as protected areas (below) and writes `indigenous.json`; Paraguay's `context.json` is produced by the same code with `--layer protected` (the default) and is unchanged.
+`meta.contributors` lists the distinct `data_ctrb` / `data_src` values of the country's territories. Size: Paraguay 0.39 MB, Bolivia 0.62 MB, Ecuador 0.25 MB, Peru 1.25 MB
+(2,530 territories; about 0.25 MB gzipped).
+
 ## biomes_latam.npz
 
 Biomes of Latin America on a 0.05-degree raster, used as the factor regions of every country whose `regions.kind` is

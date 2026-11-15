@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isContextStale, validateContext } from "./contextCheck.ts";
+import { isContextStale, validateContext, validateIndigenous } from "./contextCheck.ts";
 
 const series = () => ({ m: [1, 5], n: [2, 3.5], frp: [10, 20.5] });
 const good = () => ({
@@ -68,4 +68,38 @@ test("isContextStale: without through_day, a context generated before current.js
   assert.equal(isContextStale(c, "2026-11-15", "2026-11-15T09:00:00+00:00"), true);
   assert.equal(isContextStale(c, "2026-11-15", "2026-11-15T05:00:00+00:00"), false);
   assert.equal(isContextStale(c, "2026-11-15", undefined), false);
+});
+
+const indigenous = () => {
+  const j = good() as unknown as { meta: Record<string, unknown>; areas: Record<string, unknown>[] };
+  Object.assign(j.meta, { source: "LandMark", license: "CC BY-SA 4.0", contributors: ["FAPI", "INDI"], by_zone_default: "whole", layer: "indigenous" });
+  Object.assign(j.areas[0], { identity: "Indigenous", category: "Tierra Indígena", ethnicity: "Mbya, Guarani" });
+  delete j.areas[0].desig;
+  return j;
+};
+
+test("validateIndigenous accepts a territory file (license, contributors, optional text fields, whole default) and returns it", () => {
+  const j = indigenous();
+  assert.equal(validateIndigenous(j), j);
+  delete j.areas[0].ethnicity;           // ethnicity is omitted when the source has none
+  assert.ok(validateIndigenous(j));
+  delete j.meta.by_zone_default;         // the default is optional
+  assert.ok(validateIndigenous(j));
+});
+
+test("validateIndigenous needs the license and the contributors, and rejects what validateContext rejects", () => {
+  for (const k of ["license", "contributors"]) { const j = indigenous(); delete j.meta[k]; assert.equal(validateIndigenous(j), null, k); }
+  const bad = indigenous(); bad.meta.contributors = ["ok", 3]; assert.equal(validateIndigenous(bad), null);
+  const dflt = indigenous(); dflt.meta.by_zone_default = "none"; assert.equal(validateIndigenous(dflt), null);
+  const eth = indigenous(); eth.areas[0].ethnicity = 5; assert.equal(validateIndigenous(eth), null);
+  const unequal = indigenous(); unequal.areas[0].n = [1]; assert.equal(validateIndigenous(unequal), null);
+  assert.equal(validateIndigenous(null), null);
+});
+
+test("validateIndigenous rejects any file that carries geometry", () => {
+  for (const key of ["geometry", "coordinates", "bbox", "centroid", "lat", "lon"]) {
+    const a = indigenous(); a.areas[0][key] = [1, 2]; assert.equal(validateIndigenous(a), null, `area.${key}`);
+    const m = indigenous(); m.meta[key] = 1; assert.equal(validateIndigenous(m), null, `meta.${key}`);
+  }
+  const top = indigenous() as unknown as Record<string, unknown>; top.geometry = {}; assert.equal(validateIndigenous(top), null);
 });

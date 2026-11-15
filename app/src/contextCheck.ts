@@ -50,3 +50,26 @@ export function isContextStale(context: ContextFile, lastHotspotDate: string | n
   const g = Date.parse(context.meta.generated), cg = currentGenerated ? Date.parse(currentGenerated) : NaN;
   return Number.isFinite(g) && Number.isFinite(cg) && g < cg;
 }
+
+/** keys that would mean a territory file carries geometry (it must hold statistics only: LandMark terms, responsible use) */
+const GEOMETRY_KEYS = new Set(["geometry", "coordinates", "bbox", "centroid", "lat", "lon", "latitude", "longitude", "lng"]);
+
+/**
+ * indigenous.json -> ContextFile (same shape as context.json, for indigenous territories instead of protected areas), or null when it
+ * is not what the app reads. On top of validateContext: it must name its license and contributors, may only use the "whole" default
+ * for zones without a by_zone entry, give optional text fields as strings, and carry no geometry key anywhere an area record or
+ * the file header could hold one.
+ */
+export function validateIndigenous(j: unknown): ContextFile | null {
+  const c = validateContext(j);
+  if (!c) return null;
+  const meta = c.meta as unknown as Record<string, unknown>;
+  if (!isStr(meta.license) || !Array.isArray(meta.contributors) || !meta.contributors.every(isStr)) return null;
+  if (meta.by_zone_default !== undefined && meta.by_zone_default !== "whole") return null;
+  if ([...Object.keys(meta), ...Object.keys(c as unknown as object)].some((k) => GEOMETRY_KEYS.has(k.toLowerCase()))) return null;
+  for (const a of c.areas as unknown as Record<string, unknown>[]) {
+    if (Object.keys(a).some((k) => GEOMETRY_KEYS.has(k.toLowerCase()))) return null;
+    for (const k of ["identity", "category", "ethnicity"]) if (a[k] !== undefined && !isStr(a[k])) return null;
+  }
+  return c;
+}
