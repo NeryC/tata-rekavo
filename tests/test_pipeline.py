@@ -337,6 +337,11 @@ def test_departments_real_data():
 DEPARTMENTS = {
     "BOL": {"beni": "Beni", "chuquisaca": "Chuquisaca", "cochabamba": "Cochabamba", "la-paz": "La Paz", "oruro": "Oruro",
             "pando": "Pando", "potosi": "Potosí", "santa-cruz": "Santa Cruz", "tarija": "Tarija"},
+    "PER": {"amazonas": "Amazonas", "ancash": "Áncash", "apurimac": "Apurímac", "arequipa": "Arequipa", "ayacucho": "Ayacucho",
+            "cajamarca": "Cajamarca", "cusco": "Cusco", "huancavelica": "Huancavelica", "huanuco": "Huánuco", "ica": "Ica",
+            "junin": "Junín", "la-libertad": "La Libertad", "lambayeque": "Lambayeque", "lima": "Lima", "loreto": "Loreto",
+            "madre-de-dios": "Madre de Dios", "moquegua": "Moquegua", "pasco": "Pasco", "piura": "Piura", "puno": "Puno",
+            "san-martin": "San Martín", "tacna": "Tacna", "tumbes": "Tumbes", "ucayali": "Ucayali"},   # Callao and Lima Province merged into Lima
     "URY": {"artigas": "Artigas", "canelones": "Canelones", "cerro-largo": "Cerro Largo", "colonia": "Colonia", "durazno": "Durazno",
             "flores": "Flores", "florida": "Florida", "lavalleja": "Lavalleja", "maldonado": "Maldonado", "montevideo": "Montevideo",
             "paysandu": "Paysandú", "rio-negro": "Río Negro", "rivera": "Rivera", "rocha": "Rocha", "salto": "Salto",
@@ -381,7 +386,7 @@ def test_region_cells_bolivia_cover_the_grid_once():
     assert cell(-11.0, -66.0) in cells["tropical-subtropical-moist-broadleaf-forests"]   # Riberalta, Amazon
 
 
-@pytest.mark.parametrize("iso3", ["URY"])
+@pytest.mark.parametrize("iso3", ["PER", "URY"])
 def test_region_cells_other_countries_cover_the_grid_once(iso3):
     grid_path = ROOT / "data" / "app" / iso3 / "grid.json"
     if not grid_path.exists() or not Path(firms_pipeline.BIOMES_PATH).exists():
