@@ -341,12 +341,12 @@ test("decodeFrp takes current months from the 4th array and replaces the archive
 });
 
 test("a current month without FRP (file from before the 4th array) is no data, not 0 (Review Focus 3)", () => {
-  const cur = { cells: [[10, [2, 3], [9, 4]], [11, [3], [1]]] };
+  const cur = { cells: [[10, [3, 4], [9, 4]], [11, [4], [1]]] };
   const g = decodeFrp(smallFrp(), cur, meta);
-  assert.deepEqual([...g.noData].sort(), [2, 3]);
-  assert.equal(g.nMonths, 4);
+  assert.deepEqual([...g.noData].sort(), [3, 4]);
+  assert.equal(g.nMonths, 5);
   const s = zoneSeries(g, [10, 11]);
-  assert.ok(Number.isNaN(s.harmonized[2]) && Number.isNaN(s.harmonized[3]));
+  assert.ok(Number.isNaN(s.harmonized[3]) && Number.isNaN(s.harmonized[4]));
   assert.equal(s.harmonized[0], 5.5); // earlier months are untouched
   // a zone with no hotspot at all that month is also unknown, not a clean 0
   assert.ok(Number.isNaN(zoneSeries(g, [99]).harmonized[3]));
@@ -428,4 +428,31 @@ test("real frp.json decodes on the grid.json index; FRP series of the country is
   assert.ok(s.harmonized.some((x) => x > 1000));
   const v = verdict(g, s.harmonized, indexOf(meta, 2024, 9));
   assert.ok(Number.isFinite(v.ratio) && v.relativeError === 0);
+});
+
+test("decodeFrp: a current.json with no FRP at all makes every current month no data, even months with no hotspot cell", () => {
+  // months 3 and 4 are current; only month 3 has a hotspot cell, month 4 has none (month_coverage still lists it)
+  const cur = { meta: { month_coverage: { 3: 1, 4: 0.5 } }, cells: [[10, [3], [4]]] };
+  const g = decodeFrp(smallFrp(), cur, meta);
+  assert.deepEqual([...g.noData].sort(), [3, 4]);
+  assert.equal(g.nMonths, 5);
+  const s = zoneSeries(g, [10, 11]);
+  assert.ok(Number.isNaN(s.harmonized[3]) && Number.isNaN(s.harmonized[4]));
+});
+
+test("decodeFrp: a month for which frp.json has values is not no data, even if current.json lacks FRP for it", () => {
+  const cur = { meta: { month_coverage: { 2: 1, 3: 1 } }, cells: [[10, [2, 3], [9, 4]]] };
+  const g = decodeFrp(smallFrp(), cur, meta); // smallFrp has cell 10 with FRP in months 0 and 2
+  assert.deepEqual([...g.noData], [3]);
+  assert.equal(zoneSeries(g, [10]).harmonized[2], 7);
+});
+
+test("departmentRanking: the low-signal threshold is a parameter (default 10, 100 for MW)", () => {
+  const g = synthGrid({ 1: { history: [50, 50, 50, 50], value: 100 } });
+  const [dflt] = departmentRanking(g, [dep("p", 1)], 48);
+  assert.equal(dflt.lowSignal, false); // median 50 >= 10
+  const [mw] = departmentRanking(g, [dep("p", 1)], 48, 1, 100);
+  assert.equal(mw.lowSignal, true); // median 50 < 100
+  const [edge] = departmentRanking(g, [dep("p", 1)], 48, 1, 50);
+  assert.equal(edge.lowSignal, false); // exactly the threshold is solid
 });

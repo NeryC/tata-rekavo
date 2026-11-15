@@ -27,6 +27,8 @@ const REPO = "https://github.com/NeryC/tata-rekavo";
 const GEOBOUNDARIES = "https://www.geoboundaries.org/";
 const GEOBOUNDARIES_RETRIEVED = "2026-11-14"; // shown when departments.json did not load
 const MAX_ROWS = 1_500_000;
+// a typical month under 100 MW is too little fire to rank by ratio (counts use 10 hotspots, MW run about ten times higher)
+const FRP_LOW_SIGNAL_MEDIAN = 100;
 
 export default function App() {
   const [lang, setLang] = useState<Lang>(initialLang);
@@ -34,7 +36,7 @@ export default function App() {
   // only switches once frp.json has loaded (it is fetched lazily, on the first switch).
   const [metric, setMetric] = useState<Metric>("count");
   const [frpGrid, setFrpGrid] = useState<Grid | null>(null);
-  const [frpLoading, setFrpLoading] = useState(false);
+  const frpRequested = useRef(false); // frp.json is requested once; the promise is cached in loadFrp
   const [frpFailed, setFrpFailed] = useState(false);
   const active: Metric = metric === "frp" && frpGrid ? "frp" : "count";
   const i18n = useMemo(() => makeI18n(lang, active), [lang, active]);
@@ -95,19 +97,17 @@ export default function App() {
 
   // frp.json is 2.4 MB: only fetched once the reader asks for fire power
   useEffect(() => {
-    if (metric !== "frp" || frpGrid || !data) return;
-    let alive = true;
-    setFrpLoading(true);
+    if (metric !== "frp" || !data || frpRequested.current) return;
+    frpRequested.current = true;
+    // no cancellation: if the reader goes back to Hotspots before it arrives, the grid is still kept for the next switch
     void loadFrp().then((j) => {
-      if (!alive) return;
-      setFrpLoading(false);
       try {
         if (!j) throw new Error("frp.json unavailable");
         setFrpGrid(H.decodeFrp(j, data.currentJson, data.grid.meta));
       } catch { setFrpFailed(true); setMetric("count"); }
     });
-    return () => { alive = false; };
-  }, [metric, frpGrid, data]);
+  }, [metric, data]);
+  const frpLoading = metric === "frp" && !frpGrid && !frpFailed; // derived: cannot get stuck
 
   // countGrid fixes the geography (cells, areas, hotspot downloads); grid is the one the active measure reads
   const countGrid = data?.grid;
@@ -150,8 +150,8 @@ export default function App() {
   const monthHotspots = useMemo(() => (data ? data.hotspots.filter((h) => h.m === month) : []), [data, month]);
   const zoneMonthHotspots = useMemo(() => monthHotspots.filter((h) => zoneSet.has(h.cell)), [monthHotspots, zoneSet]);
   const ranking = useMemo(
-    () => (grid && departments && month >= 0 ? H.departmentRanking(grid, departments.departments, month, coverage(month)) : null),
-    [grid, departments, month, coverage]);
+    () => (grid && departments && month >= 0 ? H.departmentRanking(grid, departments.departments, month, coverage(month), active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : undefined) : null),
+    [grid, departments, month, coverage, active]);
   const analytics = useMemo(() => (grid && series ? rangeAnalytics(grid, series, coverage, range[0], range[1]) : null), [grid, series, coverage, range]);
 
   // estimated size of the hotspot download for this area and range
@@ -436,7 +436,7 @@ export default function App() {
                     onClick={() => setMetric("frp")}>{t.metricFrp}</button>
                 </div>
                 {frpFailed && <p className="note" role="status">{t.metricUnavailable}</p>}
-                {frpLoading && !frpFailed && <p className="note" role="status">{t.metricLoading}</p>}
+                {frpLoading && <p className="note" role="status">{t.metricLoading}</p>}
                 {experimental && <p className="exp-note" role="status"><span className="exp-badge">{t.experimentalTag}</span> {t.experimentalNote}</p>}
                 <details>
                   <summary>{t.metricHelpTitle}</summary>
@@ -445,7 +445,7 @@ export default function App() {
               </div>
             </section>
 
-            <section className={`verdict v-${v.class.id}`}>
+            <section className={`verdict v-${v.noData ? "nodata" : v.class.id}`}>
               <div aria-live="polite">
               <p className="v-when">{t.verdictWhen(i18n.monthLongLabel(selYear, selMonth), zoneLabel)}{experimental && <> <span className="exp-badge">{t.experimentalTag}</span></>}</p>
               {v.noData ? (

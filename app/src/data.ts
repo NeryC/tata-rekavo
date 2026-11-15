@@ -77,14 +77,13 @@ let frpPromise: Promise<unknown | null> | null = null;
 /**
  * frp.json (harmonized fire power, 2.4 MB), fetched once and only when the user switches to FRP.
  * Resolves to null when it is missing or malformed: the FRP option is then disabled and the app keeps working.
- * A failed fetch is not cached, so a later click can retry.
+ * The result, including a failure, is cached: after a failure the app disables the option until the page is reloaded.
  */
 export function loadFrp(): Promise<unknown | null> {
   frpPromise ??= fetch(url("frp.json"))
     .then((r) => (r.ok ? r.json() : null))
     .then((j) => (j && j.meta && j.meta.months && Array.isArray(j.cells) && j.meta.error_model ? j : null))
-    .catch(() => null)
-    .then((j) => { if (!j) frpPromise = null; return j; });
+    .catch(() => null);
   return frpPromise;
 }
 

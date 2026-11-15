@@ -42,7 +42,9 @@ export async function downloadReport(p: ReportInput, filename: string) {
 
   // analytics block
   g.fillStyle = "#0b0b0b"; g.font = `700 34px ${FONT}`;
-  g.fillText(`${num(p.analytics.total)} ${t.hotspots}`, pad, 150);
+  // a range with no data at all (FRP months not yet in the daily file) has no total: say so instead of 0
+  const noTotal = p.analytics.months === 0 && p.analytics.noData > 0;
+  g.fillText(noTotal ? t.frpNoDataShort : `${num(p.analytics.total)} ${t.hotspots}`, pad, 150);
   g.font = `16px ${FONT}`; g.fillStyle = "#52514e";
   p.lines.forEach((l, i) => g.fillText(l, pad, 182 + i * 24));
 

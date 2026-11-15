@@ -48,8 +48,11 @@ const DEFAULT_CLASSES = [
  *   shared functions need and frp.json does not carry: classes and regions come from gridMeta (grid.json meta),
  *   classes falling back to the default thresholds.
  * - current.json months are observed S-NPP FRP, taken from the optional 4th array of each cell
- *   ([idx, m[], n[], frp[]]). A current month whose cells lack that array (a file written before FRP was
- *   added) is NOT zero: it is listed in grid.noData and zoneSeries reports NaN for it.
+ *   ([idx, m[], n[], frp[]]). A current month without FRP (a file written before FRP was added) is NOT zero:
+ *   it is listed in grid.noData and zoneSeries reports NaN for it. If no cell of the file carries the array,
+ *   every current month is no data, including months with no hotspot cell (current.meta.month_coverage lists
+ *   them). Otherwise a month is no data when any of its cells lacks the array. A month for which frp.json
+ *   itself has values (overlap with the archive) is never no data.
  */
 export function decodeFrp(frpJson, currentJson = null, gridMeta = null) {
   const fm = frpJson.meta;
@@ -63,8 +66,15 @@ export function decodeFrp(frpJson, currentJson = null, gridMeta = null) {
   for (const [idx, m, x] of frpJson.cells) cells.set(idx, { m: [...m], h: [...x], modis: [...x], viirs: [...x] });
   const noData = new Set();
   if (currentJson) {
+    const hasFrp = (m, frp) => Array.isArray(frp) && frp.length === m.length;
+    if (!currentJson.cells.some(([, m, , frp]) => hasFrp(m, frp))) {
+      for (const k of Object.keys(currentJson.meta?.month_coverage ?? {})) {
+        const m = +k;
+        if (Number.isInteger(m)) { noData.add(m); nMonths = Math.max(nMonths, m + 1); }
+      }
+    }
     for (const [idx, m, , frp] of currentJson.cells) {
-      const has = Array.isArray(frp) && frp.length === m.length;
+      const has = hasFrp(m, frp);
       for (let i = 0; i < m.length; i++) {
         nMonths = Math.max(nMonths, m[i] + 1);
         if (!has) noData.add(m[i]);
@@ -79,6 +89,7 @@ export function decodeFrp(frpJson, currentJson = null, gridMeta = null) {
       cells.set(idx, c);
     }
   }
+  for (const [, m] of frpJson.cells) for (const k of m) noData.delete(k); // frp.json has values: not missing
   return { meta, cells, nMonths, noData };
 }
 
@@ -264,16 +275,17 @@ const LOW_SIGNAL_MEDIAN = 10;
  * on its own harmonized series. Rows with median >= 10 come first, by ratio descending (Infinity first);
  * then the lowSignal rows (median < 10 or no history at all, i.e. NaN median; ratio unreliable) by value descending.
  * Ties: value desc, then name. For a partial month (coverage < 1) lowSignal is judged on the coverage-scaled median.
- * Returns [{id, name, value, median, ratio, classId, relativeError, lowSignal, partial}].
+ * lowSignalMedian (default 10) is that threshold in the unit of the grid: pass a larger one for fire power in MW.
+ * Returns [{id, name, value, median, ratio, classId, relativeError, lowSignal, partial}], or [] when m is in grid.noData.
  */
-export function departmentRanking(grid, departments, m, coverage = 1) {
+export function departmentRanking(grid, departments, m, coverage = 1, lowSignalMedian = LOW_SIGNAL_MEDIAN) {
   if (grid.noData?.has(m)) return []; // month with no data for this metric: nothing to rank
   const rows = departments.map((d) => {
     const v = verdict(grid, zoneSeries(grid, d.cells).harmonized, m, coverage);
     return {
       id: d.id, name: d.name, value: v.value, median: v.median, ratio: v.ratio,
       classId: v.class.id, relativeError: v.relativeError,
-      lowSignal: !(v.median >= LOW_SIGNAL_MEDIAN), partial: v.partial, // !(>=) is also true for a NaN median (no history)
+      lowSignal: !(v.median >= lowSignalMedian), partial: v.partial, // !(>=) is also true for a NaN median (no history)
     };
   });
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);

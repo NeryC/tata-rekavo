@@ -52,7 +52,8 @@ export interface DepartmentRow {
   id: string; name: string; value: number; median: number; ratio: number;
   classId: ClassDef["id"]; relativeError: number; lowSignal: boolean; partial: boolean;
 }
-export function departmentRanking(grid: Grid, departments: DepartmentDef[], m: number, coverage?: number): DepartmentRow[];
+/** lowSignalMedian: a department whose typical month is below it is ranked by value, not ratio (default 10; 100 for fire power in MW). */
+export function departmentRanking(grid: Grid, departments: DepartmentDef[], m: number, coverage?: number, lowSignalMedian?: number): DepartmentRow[];
 export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null; p90Pct?: number }
 export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
 export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;

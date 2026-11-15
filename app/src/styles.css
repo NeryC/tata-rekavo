@@ -120,6 +120,7 @@ details p { margin-top: 6px; color: var(--ink-2); max-width: 62ch; }
 .panel > section.verdict.v-low { --v-bg: var(--v-low); }
 .panel > section.verdict.v-high { --v-bg: var(--v-high); }
 .panel > section.verdict.v-extreme { --v-bg: var(--v-extreme); }
+.panel > section.verdict.v-nodata { --v-bg: var(--muted); }
 .v-when { font-size: 15px; opacity: 0.92; }
 .v-class { margin-top: 6px; font-size: 26px; font-weight: 750; font-stretch: 110%; line-height: 1.15; }
 .v-main { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
