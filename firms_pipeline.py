@@ -8,6 +8,7 @@ Subcommands
   build          Build the harmonized dataset the web app reads (grid x month, VIIRS-equivalent)
   export-hotspots  Individual hotspots 2002-2025 in 1-degree gzip blocks, for per-search CSV downloads
   validate       Hold-out validation of the harmonization + error model + figure
+  build-frp      Harmonized Fire Radiative Power (MW per cell-month, VIIRS S-NPP-equivalent) + its own validation (experimental)
   fetch-current  Pull recent months from the FIRMS Area API (needs a free MAP_KEY); best VIIRS product per day
   build-regions  Department boundaries (geoBoundaries ADM1) and which 0.1-degree grid cells belong to each department
 
@@ -289,6 +290,16 @@ def bitpack(mask2d):
 
 
 # ----------------------------------------------------------------------------- build
+def grid_meta():
+    return {"deg": GRID_DEG, "lat0": LAT0, "lon0": LON0, "rows": GRID_N, "cols": GRID_N,
+            "cell_index": "row * cols + col; row = floor((lat-lat0)/deg), col = floor((lon-lon0)/deg)"}
+
+
+def months_meta(n_months):
+    return {"first": "%04d-%02d" % START, "count": n_months, "last": "%04d-%02d" % index_to_ym(n_months - 1),
+            "viirs_start_index": VIIRS_START_IDX, "index": "m = (year-%d)*12 + (month-%d)" % START}
+
+
 def cmd_build(args):
     os.makedirs(args.out, exist_ok=True)
     a = load_archives(args.data)
@@ -319,10 +330,7 @@ def cmd_build(args):
         "name": "Tata Rekavo harmonized hotspot record - Paraguay",
         "unit": "VIIRS S-NPP-equivalent vegetation-fire hotspots per month",
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "grid": {"deg": GRID_DEG, "lat0": LAT0, "lon0": LON0, "rows": GRID_N, "cols": GRID_N,
-                 "cell_index": "row * cols + col; row = floor((lat-lat0)/deg), col = floor((lon-lon0)/deg)"},
-        "months": {"first": "%04d-%02d" % START, "count": n_months, "last": "%04d-%02d" % index_to_ym(n_months - 1),
-                   "viirs_start_index": VIIRS_START_IDX, "index": "m = (year-%d)*12 + (month-%d)" % START},
+        "grid": grid_meta(), "months": months_meta(n_months),
         "cell_columns": ["cell_index", "month_indices", "harmonized", "modis_raw_terra_aqua", "viirs_snpp_raw"],
         "regions": {"method": "Chaco = west of the Paraguay River (polyline) and north of %.2f" % CHACO_SOUTH,
                     "river_lat": RIVER_LAT, "river_lon": RIVER_LON, "chaco_south": CHACO_SOUTH},
@@ -660,6 +668,85 @@ def cmd_validate(args):
                     "error_model": {"c": error_model["c"], "p": error_model["p"], "sys_by_year": sys_by_year}}, indent=1))
 
 
+# ----------------------------------------------------------------------------- build-frp (experimental)
+FRP_UNIT = "MW (sum of FRP), VIIRS S-NPP-equivalent"
+FRP_EXPERIMENTAL_MDAPE = 25.0   # country leave-one-year-out median error above this -> experimental
+FRP_MIN_OBS = 1.0               # MW; zone-months below this are left out of mdape / p90 (as 1 hotspot for counts)
+
+
+def frp_cells(t):
+    """t[cell, m, frp] -> [[cell, [m...], [frp...]]] with FRP rounded to 0.1 MW; cell-months that round to 0 are dropped."""
+    t = t.assign(frp=t.frp.round(1))
+    t = t[t.frp > 0].sort_values(["cell", "m"])
+    return [[int(cell), g.m.astype(int).tolist(), g.frp.tolist()] for cell, g in t.groupby("cell")]
+
+
+def _nan_none(x):
+    return None if x is None or not np.isfinite(x) else round(float(x), 4)
+
+
+def cmd_build_frp(args):
+    """Harmonized Fire Radiative Power: same method as the counts with FRP sums (factor = sum S-NPP FRP /
+    sum MODIS FRP per region x calendar month on clean overlap days), own leave-one-year-out validation."""
+    t0 = time.time()
+    os.makedirs(args.out, exist_ok=True)
+    a = load_archives(args.data)
+    v = vegetation(a).copy()
+    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    v["m"] = month_index(v.year.values, v.month.values)
+    flags = daily_flags(v)
+    f, clean_days = compute_factors(v, flags, value_col="frp")
+    v["w"], v["hsrc"] = harmonized_weights(v, flags, f, value_col="frp")
+
+    # leave-one-year-out validation + error model, exactly as for the counts
+    c = validation_frame(v, clean_days)
+    pairs = loyo_pairs(v, flags, c, value_col="frp")
+    loyo = {}
+    for name, level in [("paraguay", "country"), ("chaco", "chaco"), ("oriental", "oriental")]:
+        s = loyo_stats(pairs[level], FRP_MIN_OBS)
+        loyo[name] = {"mdape_pct": s["mdape_pct"], "p90_pct": s["p90_ape_pct"], "bias_pct": s["bias_pct"]}
+    ec, ep, bstat = fit_error_model(pairs.values())
+    sys_by_year = systematic_by_year(v, clean_days, f["aqua"], value_col="frp")
+    em = error_model_doc(ec, ep, bstat, sys_by_year, "harmonized FRP (MW)")
+
+    # cell x month FRP grid, same cell / month index as grid.json
+    v = v[v.m >= 0]
+    n_months = int(v.m.max()) + 1
+    r, cc, ok = cell_of(v.latitude.values, v.longitude.values, GRID_DEG, GRID_N)
+    v = v.assign(cell=np.where(ok, r * GRID_N + cc, -1))
+    v = v[v.cell >= 0]
+    t = v.groupby(["cell", "m"]).w.sum().rename("frp").reset_index()
+    cells = frp_cells(t)
+    meta = {
+        "name": "Tata Rekavo harmonized Fire Radiative Power - Paraguay (experimental)",
+        "unit": FRP_UNIT,
+        "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "grid": grid_meta(), "months": months_meta(n_months),
+        "cell_columns": ["cell_index", "month_indices", "frp_mw"],
+        "cells_note": "only cell-months with harmonized FRP > 0 (rounded to 0.1 MW)",
+        "factors": {s: {reg: [_nan_none(f[s][(reg, mo)]) for mo in range(1, 13)] for reg in REGIONS} for s in ["aqua", "terra"]},
+        "factor_definition": "sum of VIIRS S-NPP FRP / sum of MODIS {aqua|terra} FRP, vegetation fires, clean overlap days %s..%s; "
+                             "applied to each MODIS hotspot's FRP, S-NPP (and NOAA-20 fill) FRP used as observed" % (
+                                 clean_days.min().date(), clean_days.max().date()),
+        "validation": {"leave_one_year_out": loyo},
+        "validation_note": "Aqua FRP x factor fitted without the held-out year vs S-NPP FRP observed, zone-months with "
+                           ">= %g MW; mdape = median, p90 = 90th percentile of the absolute percentage error" % FRP_MIN_OBS,
+        "error_model": {k: em[k] for k in ["formula", "c", "p", "sys_by_year", "meaning"]},
+        "experimental": bool(loyo["paraguay"]["mdape_pct"] > FRP_EXPERIMENTAL_MDAPE),
+        "experimental_rule": "true when the country leave-one-year-out mdape_pct > %g" % FRP_EXPERIMENTAL_MDAPE,
+        "sources": ["NASA FIRMS MODIS Collection 6.1 (Terra, Aqua) standard processing",
+                    "NASA FIRMS VIIRS 375 m (Suomi NPP, NOAA-20) standard processing"],
+    }
+    path = os.path.join(args.out, "frp.json")
+    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"meta": meta, "cells": cells}, fh, separators=(",", ":"))
+    atomic_replace([path + ".tmp"])
+    log(json.dumps({"leave_one_year_out": loyo, "experimental": meta["experimental"],
+                    "error_model": {"c": em["c"], "p": em["p"]}, "factors": meta["factors"]}))
+    log(f"frp.json: {len(cells)} cells, {sum(len(x[1]) for x in cells):,} cell-months, "
+        f"{os.path.getsize(path) / 1e6:.2f} MB, {time.time() - t0:.0f} s")
+
+
 # ----------------------------------------------------------------------------- fetch-current
 def api_csv(url):
     status, body = http_get(url, timeout=120)
@@ -779,8 +866,15 @@ def cmd_fetch_current(args):
     df["m"] = month_index(df.date.dt.year.values, df.date.dt.month.values)
     gr, gc, gok = cell_of(df.latitude.values, df.longitude.values, GRID_DEG, GRID_N)
     df["cell"] = np.where(gok, gr * GRID_N + gc, -1)
-    t = df[df.cell >= 0].groupby(["cell", "m"]).size().rename("n").reset_index()
-    cells = [[int(cell), g.m.astype(int).tolist(), g.n.astype(float).tolist()] for cell, g in t.groupby("cell")]
+    grp = df[df.cell >= 0].groupby(["cell", "m"])
+    t = grp.size().rename("n").to_frame()
+    has_frp = "frp" in df.columns   # optional 4th array: FRP sum (MW) per month, observed VIIRS, no factor
+    if has_frp:
+        t["frp"] = df.loc[df.cell >= 0].assign(frp=pd.to_numeric(df.frp, errors="coerce")).groupby(["cell", "m"]).frp.sum()
+    t = t.reset_index()
+    cells = [[int(cell), g.m.astype(int).tolist(), g.n.astype(float).tolist()] + ([g.frp.round(1).tolist()] if has_frp else [])
+             for cell, g in t.groupby("cell")]
+    cell_columns = ["cell_index", "month_indices", "viirs_hotspots"] + (["viirs_frp_mw"] if has_frp else [])
 
     alld = pd.date_range(start, end)
     month_cov, month_src = {}, {}
@@ -798,7 +892,7 @@ def cmd_fetch_current(args):
                                       "(S-NPP preferred; NOAA-20 / NOAA-21 when S-NPP has no data; standard processing before near-real-time)",
                             "from": str(start.date()), "to": str(end.date()),
                             "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                            "clip": "Paraguay mask (mask.json)", "cell_columns": ["cell_index", "month_indices", "viirs_hotspots"],
+                            "clip": "Paraguay mask (mask.json)", "cell_columns": cell_columns,
                             "month_coverage": month_cov,
                             "month_coverage_note": "share of the month's days with data (1 = complete month); comparisons are scaled by it",
                             "month_products": month_src, "days_without_data": missing_days},
@@ -1035,12 +1129,13 @@ def main():
     f = sp.add_parser("fetch-current"); f.add_argument("--out", default="data/app"); f.add_argument("--map-key")
     f.add_argument("--start", default="2026-01-01"); f.add_argument("--end"); f.add_argument("--cache", default="data/api_cache")
     f.add_argument("--offline", action="store_true", help="build current.json from cached windows only, no API calls")
+    fr = sp.add_parser("build-frp"); fr.add_argument("--data", default="data/raw"); fr.add_argument("--out", default="data/app")
     sn = sp.add_parser("build-season"); sn.add_argument("--data", default="data/raw"); sn.add_argument("--out", default="data/app")
     r = sp.add_parser("build-regions"); r.add_argument("--out", default="data/app"); r.add_argument("--ext", default="data/ext")
     r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/pry_adm1.geojson exists")
     a = p.parse_args()
     {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current,
-     "build-regions": cmd_build_regions, "build-season": cmd_build_season}[a.cmd](a)
+     "build-regions": cmd_build_regions, "build-season": cmd_build_season, "build-frp": cmd_build_frp}[a.cmd](a)
 
 
 if __name__ == "__main__":

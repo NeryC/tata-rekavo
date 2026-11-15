@@ -468,6 +468,27 @@ def test_fit_error_model_recovers_power_law():
     assert (bstat.k >= 30).all()
 
 
+def test_frp_cells_rounds_and_drops_zero():
+    t = pd.DataFrame({"cell": [5, 5, 7, 9], "m": [3, 1, 0, 2], "frp": [12.34, 0.04, 0.0, 1.06]})
+    assert firms_pipeline.frp_cells(t) == [[5, [3], [12.3]], [9, [2], [1.1]]]
+
+
+def test_fetch_current_adds_frp_sum_array(tmp_path, monkeypatch):
+    out, args = _fetch_args(tmp_path)
+    av = b"\n".join([b"data_id,min_date,max_date", b"VIIRS_SNPP_SP,2026-01-01,2026-01-03", b""])
+    csv = b"\n".join([b"latitude,longitude,acq_date,acq_time,confidence,frp,type",
+                      b"-23.01,-58.01,2026-01-02,0130,n,1.2,0", b"-23.02,-58.02,2026-01-02,0131,n,2.4,0", b""])
+    monkeypatch.setattr(firms_pipeline, "http_get", lambda url, timeout=300: (200, av if "data_availability" in url else csv))
+    monkeypatch.setattr(firms_pipeline.time, "sleep", lambda s: None)
+    cmd_fetch_current(args)
+    doc = json.loads((out / "current.json").read_text())
+    (cell,) = doc["cells"]
+    m = int(month_index(2026, 1))
+    assert cell[1:3] == [[m], [2.0]]           # first three arrays unchanged
+    assert cell[3] == [3.6]                    # FRP sum per month, observed VIIRS (MW)
+    assert doc["meta"]["cell_columns"] == ["cell_index", "month_indices", "viirs_hotspots", "viirs_frp_mw"]
+
+
 def test_frp_real_data():
     fj, gj = ROOT / "data" / "app" / "frp.json", ROOT / "data" / "app" / "grid.json"
     if not fj.exists():

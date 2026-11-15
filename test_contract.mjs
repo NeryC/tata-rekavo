@@ -88,4 +88,18 @@ else {
   check(deps.length === 17 && n > 0 && worst < 0.01, `${deps.length} department series sum to the country series in ${n} months with >100 hotspots (max rel diff ${worst.toExponential(2)})`);
 }
 
+// 10. harmonized FRP (experimental, optional file): same cell and month index as grid.json
+let frp = null;
+try { frp = JSON.parse(readFileSync(join(dir, "frp.json"), "utf8")); } catch {}
+if (!frp) console.log("     note: frp.json not found in " + dir + ", skipping FRP checks");
+else {
+  const gridCells = new Set(gridJson.cells.map((c) => c[0]));
+  const nm = gridJson.meta.months.count;
+  const okCells = frp.cells.every(([idx, m, x]) => gridCells.has(idx) && m.length === x.length && m.every((k) => k >= 0 && k < nm) && x.every((y) => y > 0));
+  const lo = frp.meta.validation.leave_one_year_out;
+  check(okCells && frp.meta.months.count === nm, `frp.json: ${frp.cells.length} cells on the grid.json index, ${nm} months`);
+  console.log(`     FRP leave-one-year-out mdape: Paraguay ${lo.paraguay.mdape_pct}%, Chaco ${lo.chaco.mdape_pct}%, Oriental ${lo.oriental.mdape_pct}%` +
+    (frp.meta.experimental ? " (experimental)" : ""));
+}
+
 process.exit(fails ? 1 : 0);

@@ -154,6 +154,21 @@ test("departmentRanking passes coverage through (partial month)", () => {
   assert.equal(r.ratio, 1);
 });
 
+test("decodeGrid ignores the optional 4th current.json array (FRP sums)", () => {
+  const g = {
+    meta: { months: { count: 3, first: "2002-07" } },
+    cells: [[10, [0, 2], [5, 7], [2, 3], [0, 7]]],
+  };
+  const cur3 = { cells: [[10, [2, 3], [9, 4]], [11, [3], [1]]] };
+  const cur4 = { cells: [[10, [2, 3], [9, 4], [123.4, 55.5]], [11, [3], [1], [0.7]]] };
+  const a = decodeGrid(structuredClone(g), cur3);
+  const b = decodeGrid(structuredClone(g), cur4);
+  assert.deepEqual([...b.cells.entries()], [...a.cells.entries()]);
+  assert.equal(b.nMonths, 4);
+  assert.deepEqual(b.cells.get(10), { m: [0, 2, 3], h: [5, 9, 4], modis: [2, 3, 0], viirs: [0, 9, 4] });
+  assert.deepEqual(b.cells.get(11), { m: [3], h: [1], modis: [0], viirs: [1] });
+});
+
 test("departmentRanking on real data: 17 departments with finite medians", () => {
   const departments = JSON.parse(
     readFileSync(new URL("../data/app/departments.json", import.meta.url), "utf8"),

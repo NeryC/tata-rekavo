@@ -55,6 +55,8 @@ Satellites have counted fire hotspots over Paraguay since 2000, but the record i
 
 **Effect.** Mean 2013–2025 vs mean 2003–2011: naive record ×2.78, harmonized ×0.76. MODIS alone, with no sensor change, gives ×0.82.
 
+**Harmonized FRP (experimental).** The same method also runs on Fire Radiative Power: the factor is the summed S-NPP FRP over the summed MODIS Aqua FRP, per region and calendar month, on the same clean overlap days, and the result is total FRP per cell-month in MW, VIIRS S-NPP-equivalent (`frp.json`, built with `build-frp`). Aqua factors range from 1.03 to 2.77, and they barely move when a year is left out (median per-fold spread 1.4 %, counts 0.9 %). Leave-one-year-out median error, with 90th percentile and bias: Paraguay 8.5 % (22.7 %, +1.1 %), Chaco 10.4 % (32.8 %, +0.4 %), Oriental 14.3 % (39.6 %, +2.2 %). The count record gets 7.0 %, 6.7 % and 9.8 %. FRP errors are larger, and the 90th percentile shows more of that, because a few large fires carry much of a month's FRP. The file is flagged `experimental` if the country median error goes above 25 %, which it does not today.
+
 The approach follows the same principle used in the literature to bridge the MODIS → VIIRS transition: regional statistical calibration over the overlap period.
 - NASA VIIRS burned area product (VNP64A1), *Remote Sensing of Environment* — anticipates the need for regional-scale statistical calibration between VIIRS and MODIS to provide a single long-term record: https://geog.umd.edu/sites/geog.umd.edu/files/pubs/1-s2.0-S0034425725004109-main.pdf
 - GFED5NRT (Chen et al., 2026, *Earth System Science Data*) — region- and biome-specific lookup tables to keep VIIRS consistent with the MODIS-era record: https://essd.copernicus.org/articles/18/7535/2026/
@@ -65,7 +67,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 | File | Content |
 |---|---|
 | `grid.json` | Harmonized record on a 0.1° grid, monthly, Jul 2002 – Dec 2025 (3,632 cells, 305k cell-months, ~1 MB gzipped). Includes factors, error model and validation in `meta` |
-| `current.json` | 2026 months from the FIRMS Area API, clipped to Paraguay. For each day it uses the best VIIRS product available: S-NPP first, NOAA-20 / NOAA-21 when S-NPP has no data, standard processing before near-real-time. Includes per-month coverage and the products used |
+| `current.json` | 2026 months from the FIRMS Area API, clipped to Paraguay. For each day it uses the best VIIRS product available: S-NPP first, NOAA-20 / NOAA-21 when S-NPP has no data, standard processing before near-real-time. Includes per-month coverage and the products used. Cell entry: `[cell_index, month_indices[], viirs_hotspots[], viirs_frp_mw[]]` (4th array optional: observed FRP sum, no factor) |
 | `current_hotspots.csv` | The 2026 hotspots themselves |
 | `burn_history.json` | ~1 km rasters: last year each cell burned, and number of years it burned (2002–2025) |
 | `series_regions.csv` | Monthly harmonized / raw MODIS / raw VIIRS for Paraguay, Chaco, Oriental |
@@ -74,6 +76,7 @@ The approach follows the same principle used in the literature to bridge the MOD
 | `departments.json` | The 17 departments (Asunción merged into Central): simplified boundary, bounding box and the grid cells whose centre falls inside, so every cell belongs to exactly one department. Boundaries from geoBoundaries (see below) |
 | `gaps.json` | Detected sensor outages and the days filled |
 | `mask.json` | ~5 km country mask (cells with any hotspot in the Paraguay archives), used to clip API data |
+| `frp.json` | Experimental: harmonized Fire Radiative Power (MW per cell-month, VIIRS S-NPP-equivalent) on the `grid.json` cell and month index, with FRP factors, its own leave-one-year-out validation, error model and the `experimental` flag in `meta`. Cell entry: `[cell_index, month_indices[], frp_mw[]]` |
 | `metrics.json` | Full validation results |
 | `validation.png` | Naive vs harmonized record + hold-out validation |
 
@@ -125,6 +128,7 @@ pip install -r requirements.txt
 python firms_pipeline.py download                    # ~300 MB of FIRMS archives into data/raw (resumable)
 python firms_pipeline.py build                       # data/app/*.json, *.csv
 python firms_pipeline.py validate                    # metrics.json, validation.png, error model into grid.json
+python firms_pipeline.py build-frp                   # frp.json: harmonized FRP + its own validation (experimental)
 python firms_pipeline.py export-hotspots             # data/app/hotspots: individual hotspots in 1-degree gzip blocks
 FIRMS_MAP_KEY=... python firms_pipeline.py fetch-current --start 2026-01-01   # free key: https://firms.modaps.eosdis.nasa.gov/api/map_key/
 node test_contract.mjs data/app
