@@ -707,6 +707,11 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                   country.iso3 === "PRY" ? t.admPry : `${countryName} ADM1`)}{" "}
                   <a href={GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
                 </p>
+                {countGrid.meta.regions?.kind === "biome" && (
+                  <p>{t.footBiomes}{" "}
+                    <a href="https://ecoregions.appspot.com/" target="_blank" rel="noreferrer">RESOLVE Ecoregions 2017</a>
+                  </p>
+                )}
                 {context && (
                   <p>{t.footWdpa(context.meta.citation, context.meta.retrieved)}{" "}
                     <a href={WDPA_URL} target="_blank" rel="noreferrer">{WDPA_URL}</a>. {t.footWdpaTerms}
