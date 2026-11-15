@@ -1,0 +1,47 @@
+{
+ "default": "PRY",
+ "countries": [
+  {
+   "iso3": "PRY",
+   "path": "",
+   "area": "paraguay",
+   "name": {
+    "en": "Paraguay",
+    "es": "Paraguay"
+   },
+   "bbox": [
+    -62.8,
+    -27.7,
+    -54.1,
+    -19.1
+   ],
+   "tz": "America/Asuncion",
+   "tzCity": "Asunción",
+   "example": [
+    -22.35,
+    -60.03
+   ]
+  },
+  {
+   "iso3": "BOL",
+   "path": "BOL/",
+   "area": "bolivia",
+   "name": {
+    "en": "Bolivia",
+    "es": "Bolivia"
+   },
+   "bbox": [
+    -69.7,
+    -22.95,
+    -57.4,
+    -9.6
+   ],
+   "tz": "America/La_Paz",
+   "tzCity": "La Paz",
+   "example": [
+    -16.37,
+    -60.96
+   ]
+  }
+ ]
+}

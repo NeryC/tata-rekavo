@@ -35,7 +35,7 @@ test("verdict is partial on the first day of a month (coverage 1/30)", () => {
 test("validationSummary reads the real grid.json: paraguay/chaco/oriental rows", () => {
   const s = validationSummary(meta);
   assert.deepEqual(s.rows, [
-    { area: "paraguay", mdapePct: 7.0, classAgreementPct: 95 },
+    { area: "country", mdapePct: 7.0, classAgreementPct: 95 },
     { area: "chaco", mdapePct: 6.7, classAgreementPct: 91 },
     { area: "oriental", mdapePct: 9.8, classAgreementPct: 86 },
   ]);
@@ -50,7 +50,7 @@ test("validationSummary rounds mdape to 1 decimal and agreement to an integer", 
       anomaly_class_agreement: { country: { spearman: 0.9, same_class_pct: 94.6 } },
     },
   });
-  assert.deepEqual(s.rows, [{ area: "paraguay", mdapePct: 7, classAgreementPct: 95 }]);
+  assert.deepEqual(s.rows, [{ area: "country", mdapePct: 7, classAgreementPct: 95 }]);
 });
 
 test("validationSummary omits missing areas and nulls missing agreement", () => {
@@ -64,7 +64,7 @@ test("validationSummary omits missing areas and nulls missing agreement", () => 
     },
   });
   assert.deepEqual(s.rows, [
-    { area: "paraguay", mdapePct: 7, classAgreementPct: null },
+    { area: "country", mdapePct: 7, classAgreementPct: null },
     { area: "oriental", mdapePct: 9.8, classAgreementPct: 86 },
   ]);
   assert.equal(s.spearman, null);
@@ -407,12 +407,13 @@ test("seriesToCSV in frp mode labels MW, drops raw sensor columns and leaves no-
 
 test("validationSummary reads frp.json: `paraguay` key, p90, no class agreement (Review Focus 2 and 5)", () => {
   const s = validationSummary(frpJson.meta);
-  assert.deepEqual(s.rows.map((r) => r.area), ["paraguay", "chaco", "oriental"]);
+  assert.deepEqual(s.rows.map((r) => r.area), ["country", "chaco", "oriental"]);
   const lo = frpJson.meta.validation.leave_one_year_out;
   for (const r of s.rows) {
+    const k = r.area === "country" ? "paraguay" : r.area;
     assert.equal(r.classAgreementPct, null);
-    assert.equal(r.mdapePct, Math.round(lo[r.area].mdape_pct * 10) / 10);
-    assert.equal(r.p90Pct, Math.round(lo[r.area].p90_pct * 10) / 10);
+    assert.equal(r.mdapePct, Math.round(lo[k].mdape_pct * 10) / 10);
+    assert.equal(r.p90Pct, Math.round(lo[k].p90_pct * 10) / 10);
   }
   assert.equal(s.spearman, null);
   assert.equal(s.nMonths, 0);
@@ -594,4 +595,17 @@ test("protectedSummary: an area listed for a department but with no fire there h
   const a = area("a", "A", [[50, 30]], { departments: ["d1", "d2"], by_zone: { d1: { m: [50], n: [30], frp: [300] }, chaco: { m: [50], n: [30], frp: [300] } } });
   const ctx = ctxOf([a], { paraguay: { m: [50], n: [30], frp: [300] }, d1: { m: [50], n: [30], frp: [300] }, d2: { m: [], n: [], frp: [] } });
   assert.equal(protectedSummary(ctx, "d2", 50).areas[0].value, 0);
+});
+
+test("validationSummary for Bolivia: country and the five biomes, block / cell levels left out", () => {
+  const bol = JSON.parse(readFileSync(new URL("../data/app/BOL/grid.json", import.meta.url), "utf8")).meta;
+  const s = validationSummary(bol, "bolivia");
+  assert.deepEqual(s.rows.map((r) => r.area), ["country", ...bol.regions.names]);
+  assert.equal(s.rows[0].mdapePct, 7.4);
+  assert.equal(s.nMonths, 167);
+  const bfrp = JSON.parse(readFileSync(new URL("../data/app/BOL/frp.json", import.meta.url), "utf8")).meta;
+  const f = validationSummary(bfrp, "bolivia");
+  assert.equal(f.rows[0].area, "country");
+  assert.equal(f.rows[0].mdapePct, 9.1);
+  assert.equal(f.rows.length, 6);
 });

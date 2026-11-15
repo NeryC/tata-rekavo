@@ -172,15 +172,18 @@ export function zoneSeries(grid, cellIds) {
 
 /**
  * Validation panel summary: leave-one-year-out MdAPE (and, when published, the p90 error and the
- * anomaly-class agreement) for paraguay/chaco/oriental. The country is read from `country` (grid.json)
- * or `paraguay` (frp.json). classAgreementPct is null when absent (frp.json has none); p90Pct is only
- * present on a row when the metric publishes it.
+ * anomaly-class agreement) for the country and each factor region, in the order the file lists them.
+ * The country row has area "country" and is read from `country` (grid.json) or from the country's area id
+ * (frp.json: "paraguay", "bolivia"); every other key is a region, except the block / cell levels.
+ * classAgreementPct is null when absent (frp.json has none); p90Pct is only present on a row when the metric publishes it.
  */
-export function validationSummary(meta) {
+export function validationSummary(meta, countryArea = "paraguay") {
   const loyo = meta?.validation?.leave_one_year_out ?? {};
   const agree = meta?.validation?.anomaly_class_agreement ?? {};
   const rows = [];
-  for (const [area, keys] of [["paraguay", ["country", "paraguay"]], ["chaco", ["chaco"]], ["oriental", ["oriental"]]]) {
+  const countryKeys = ["country", countryArea];
+  const regionKeys = Object.keys(loyo).filter((k) => !countryKeys.includes(k) && !/^(block|cell)_/.test(k));
+  for (const [area, keys] of [["country", countryKeys], ...regionKeys.map((k) => [k, [k]])]) {
     const key = keys.find((k) => typeof loyo[k]?.mdape_pct === "number");
     if (!key) continue;
     const e = loyo[key];
@@ -194,7 +197,7 @@ export function validationSummary(meta) {
     rows.push(row);
   }
   const sp = agree.country?.spearman;
-  return { rows, spearman: typeof sp === "number" ? sp : null, nMonths: loyo.country?.n ?? loyo.paraguay?.n ?? 0 };
+  return { rows, spearman: typeof sp === "number" ? sp : null, nMonths: loyo.country?.n ?? loyo[countryArea]?.n ?? 0 };
 }
 
 /** Relative error band (median absolute relative error) for a zone-month value. */

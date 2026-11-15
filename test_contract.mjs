@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as H from "./harmonized.js";
+import { buildIndex } from "./countries_index.mjs";
 
 const dir = process.argv[2] || "data/app";
 const gridJson = JSON.parse(readFileSync(join(dir, "grid.json"), "utf8"));
@@ -91,6 +92,8 @@ console.log(`     2013-2025 vs 2003-2011: naive x${(avg(all.naive, 2013, 2025) /
 // 7. burn history (optional file: only countries with burn_history in countries.json)
 let bhJson = null;
 try { bhJson = JSON.parse(readFileSync(join(dir, "burn_history.json"), "utf8")); } catch {}
+// Paraguay ships it ("fire in new places"); for other countries it is optional and the app hides that block without it
+if (countryArea === "paraguay") check(bhJson !== null, "burn_history.json present (required for Paraguay)");
 if (!bhJson) console.log("     note: burn_history.json not found in " + dir + ", skipping burn-history checks");
 else {
   const bh = H.decodeBurnHistory(bhJson);
@@ -143,6 +146,37 @@ else {
   console.log(`     FRP months without data in current.json: ${missing.length ? missing.join(", ") : "none"}`);
   const vf = H.verdict(fgrid, fall.harmonized, H.indexOf(fgrid.meta, 2024, 9));
   console.log(`     FRP Sep 2024 ${countryLabel}: ${vf.value.toFixed(0)} MW vs median ${vf.median.toFixed(0)} -> x${vf.ratio.toFixed(2)} ${vf.class.label}`);
+}
+
+// 11. region presets of a biome country (optional file): cells of each factor region, drawn and summed by the app
+let regionsJson = null;
+try { regionsJson = JSON.parse(readFileSync(join(dir, "regions.json"), "utf8")); } catch {}
+if (!regionsJson) console.log("     note: regions.json not found in " + dir + (gridJson.meta.regions?.kind === "biome" ? " (the app shows no region presets)" : ""));
+else {
+  const names = gridJson.meta.regions?.names ?? [];
+  const seen = new Set();
+  let dup = 0, inGrid = 0;
+  for (const r of regionsJson.regions) for (const c of r.cells) { if (seen.has(c)) dup++; seen.add(c); }
+  for (const idx of grid.cells.keys()) if (seen.has(idx)) inGrid++;
+  check(regionsJson.regions.length > 0 && regionsJson.regions.every((r) => names.includes(r.id)) && dup === 0,
+    `regions.json: ${regionsJson.regions.length} regions of meta.regions.names, no cell in two regions`);
+  check(inGrid / grid.cells.size >= 0.99, `regions.json covers ${(100 * inGrid / grid.cells.size).toFixed(1)}% of the grid cells with data`);
+  for (const r of regionsJson.regions) {
+    const zs = H.zoneSeries(grid, r.cells);
+    const v = H.verdict(grid, zs.harmonized, H.indexOf(grid.meta, 2024, 9));
+    const ref = csv.find((x) => x[0] === r.id && +x[1] === 2024 && +x[2] === 9);
+    console.log(`     ${r.id}: ${r.cells.length} cells; Sep 2024 ${v.value.toFixed(0)} by cell centre vs ${ref ? (+ref[3]).toFixed(0) : "?"} by hotspot (pipeline) -> x${v.ratio.toFixed(2)}`);
+  }
+}
+
+// 12. countries index (site root only): in sync with countries.json, every listed country has its data folder
+let index = null;
+try { index = JSON.parse(readFileSync(join(dir, "countries.json"), "utf8")); } catch {}
+if (index) {
+  const config = JSON.parse(readFileSync(new URL("./countries.json", import.meta.url), "utf8"));
+  const want = buildIndex(config, dir);
+  check(JSON.stringify(index) === JSON.stringify(want), `countries.json index in sync with countries.json (${index.countries.map((c) => c.iso3).join(", ")}); regenerate with node countries_index.mjs`);
+  check(index.countries.some((c) => c.iso3 === index.default && c.path === ""), `default country ${index.default} is served from the site root`);
 }
 
 process.exit(fails ? 1 : 0);

@@ -52,8 +52,8 @@ export function climatologyFor(
   season: SeasonFile | null, zoneKind: string, departmentId: string | null,
 ): SeasonClim | null {
   if (!season) return null;
-  const id = zoneKind === "department" ? departmentId
-    : zoneKind === "paraguay" || zoneKind === "chaco" || zoneKind === "oriental" ? zoneKind : null;
+  // the country and its region presets use their area id as zone ("paraguay", "chaco", a biome id), as season.json does
+  const id = zoneKind === "department" ? departmentId : zoneKind === "custom" ? null : zoneKind;
   if (!id || !Object.hasOwn(season.areas, id)) return null;
   const a = season.areas[id];
   const ok = (v: unknown) => Array.isArray(v) && v.length === SEASON_DAYS;

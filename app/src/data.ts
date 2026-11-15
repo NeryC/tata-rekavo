@@ -13,10 +13,93 @@ export interface Hotspot {
 }
 
 export const HOTSPOT_HEADER = "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp,daynight,product,harmonized_weight,new_place";
-/** currentJson: the raw current.json, kept so the FRP grid can be decoded later with the same months. */
-export interface AppData { grid: Grid; current: CurrentMeta | null; currentJson: unknown; hotspots: Hotspot[]; historyPeriod: string }
+/** currentJson: the raw current.json, kept so the FRP grid can be decoded later with the same months.
+ *  hasBurnHistory: burn_history.json loaded ("fire in new places" is only offered then).
+ *  regionCells: cells of each factor region of a biome country (regions.json), null for Paraguay (river split from meta) or when missing. */
+export interface AppData {
+  grid: Grid; current: CurrentMeta | null; currentJson: unknown; hotspots: Hotspot[]; historyPeriod: string;
+  hasBurnHistory: boolean; regionCells: RegionCells | null;
+}
 
-export const url = (f: string) => `${import.meta.env.BASE_URL}${f}`;
+/** A file of the site; `path` is the country's folder ("" for Paraguay, the site root; "BOL/" for Bolivia). */
+export const url = (f: string, path = "") => `${import.meta.env.BASE_URL}${path}${f}`;
+
+// ---------------------------------------------------------------- countries
+export interface CountryInfo {
+  iso3: string;
+  /** folder of the country's data under the site root: "" (Paraguay) or "BOL/" */
+  path: string;
+  /** id of the whole-country series / zone ("paraguay", "bolivia") */
+  area: string;
+  name: { en: string; es: string };
+  bbox: [number, number, number, number];
+  tz?: string;
+  tzCity?: string;
+  /** example point [lat, lon] of the coordinates form */
+  example?: [number, number];
+}
+export interface CountriesIndex { default: string; countries: CountryInfo[] }
+
+/** Paraguay as the app knew it before the countries index: used when countries.json is missing or broken. */
+export const PARAGUAY: CountryInfo = {
+  iso3: "PRY", path: "", area: "paraguay", name: { en: "Paraguay", es: "Paraguay" }, bbox: [-62.8, -27.7, -54.1, -19.1],
+  tz: "America/Asuncion", tzCity: "Asunción", example: [-22.35, -60.03],
+};
+
+const isBBox = (b: unknown): b is [number, number, number, number] =>
+  Array.isArray(b) && b.length === 4 && b.every((x) => typeof x === "number" && Number.isFinite(x)) && b[0] < b[2] && b[1] < b[3];
+const isCountry = (c: CountryInfo) => !!c && typeof c.iso3 === "string" && /^[A-Z]{3}$/.test(c.iso3) && typeof c.path === "string"
+  && /^([A-Z]{3}\/)?$/.test(c.path) && typeof c.area === "string" && !!c.area && typeof c.name?.en === "string"
+  && typeof c.name?.es === "string" && isBBox(c.bbox);
+
+let countriesPromise: Promise<CountriesIndex | null> | null = null;
+/** countries.json (the index of the countries the site has), fetched once. Null when missing or malformed: Paraguay only. */
+export function loadCountries(): Promise<CountriesIndex | null> {
+  countriesPromise ??= fetch(url("countries.json"))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j): CountriesIndex | null => {
+      if (!j || !Array.isArray(j.countries)) return null;
+      const countries = (j.countries as CountryInfo[]).filter(isCountry);
+      return countries.some((c) => c.iso3 === "PRY") ? { default: typeof j.default === "string" ? j.default : "PRY", countries } : null;
+    })
+    .catch(() => null);
+  return countriesPromise;
+}
+
+/** One promise per key: each file is fetched once per country. */
+function once<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promise<T>): Promise<T> {
+  let p = cache.get(key);
+  if (!p) { p = make(); cache.set(key, p); }
+  return p;
+}
+const getJson = (f: string, path: string) => fetch(url(f, path)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+// ---------------------------------------------------------------- factor regions
+export interface RegionCells { meta?: { kind?: string; source?: string; note?: string }; regions: { id: string; label?: string; cells: number[] }[] }
+
+function validRegionCells(j: unknown): RegionCells | null {
+  const r = j as RegionCells | null;
+  return r && Array.isArray(r.regions) && r.regions.length > 0
+    && r.regions.every((x) => x && typeof x.id === "string" && Array.isArray(x.cells)) ? r : null;
+}
+
+/**
+ * The region presets of a country and the region of each cell. Paraguay: Chaco / Oriental from the river polyline in
+ * meta.regions. Biome countries: from regions.json, in the order of meta.regions.names. No regions when neither is available.
+ */
+export function regionPresets(meta: GridMeta, cellIds: Iterable<number>, regionCells: RegionCells | null): { ids: string[]; of: Map<number, string> } {
+  const of = new Map<number, string>();
+  const r = meta.regions;
+  if (r && Array.isArray(r.river_lat) && Array.isArray(r.river_lon)) {
+    for (const idx of cellIds) of.set(idx, regionOfCell(meta, idx));
+    return { ids: ["chaco", "oriental"], of };
+  }
+  if (!regionCells) return { ids: [], of };
+  const order = Array.isArray(r?.names) ? r.names : regionCells.regions.map((x) => x.id);
+  const ids = order.filter((id) => regionCells.regions.some((x) => x.id === id));
+  for (const reg of regionCells.regions) if (ids.includes(reg.id)) for (const c of reg.cells) of.set(c, reg.id);
+  return { ids, of };
+}
 
 function b64ToBytes(b64: string) {
   const bin = atob(b64);
@@ -50,68 +133,68 @@ export interface DepartmentsFile {
   departments: Department[];
 }
 
-let departmentsPromise: Promise<DepartmentsFile | null> | null = null;
-/** departments.json, fetched once. Resolves to null when it is missing or malformed: the app works without it. */
-export function loadDepartments(): Promise<DepartmentsFile | null> {
-  departmentsPromise ??= fetch(url("departments.json"))
+const departmentsCache = new Map<string, Promise<DepartmentsFile | null>>();
+/** departments.json of a country, fetched once. Resolves to null when it is missing or malformed: the app works without it. */
+export function loadDepartments(path = ""): Promise<DepartmentsFile | null> {
+  return once(departmentsCache, path, () => fetch(url("departments.json", path))
     .then((r) => (r.ok ? r.json() : null))
     .then((j): DepartmentsFile | null => {
       const ok = j && Array.isArray(j.departments) && j.departments.length > 0
         && j.departments.every((d: Department) => d && typeof d.id === "string" && Array.isArray(d.cells) && Array.isArray(d.bbox) && d.geometry);
       return ok ? (j as DepartmentsFile) : null;
     })
-    .catch(() => null);
-  return departmentsPromise;
+    .catch(() => null));
 }
 
-let seasonPromise: Promise<SeasonFile | null> | null = null;
+const seasonCache = new Map<string, Promise<SeasonFile | null>>();
 /** season.json (daily cumulative climatology), fetched once. Resolves to null when it is missing or malformed: the season chart is hidden. */
-export function loadSeason(): Promise<SeasonFile | null> {
-  seasonPromise ??= fetch(url("season.json"))
+export function loadSeason(path = ""): Promise<SeasonFile | null> {
+  return once(seasonCache, path, () => fetch(url("season.json", path))
     .then((r) => (r.ok ? r.json() : null))
     .then((j): SeasonFile | null => (j && typeof j.areas === "object" && j.areas !== null && !Array.isArray(j.areas) ? (j as SeasonFile) : null))
-    .catch(() => null);
-  return seasonPromise;
+    .catch(() => null));
 }
 
-let contextPromise: Promise<ContextFile | null> | null = null;
+const contextCache = new Map<string, Promise<ContextFile | null>>();
 /**
  * context.json (fire statistics per protected area, WDPA; no geometry), fetched once.
  * Resolves to null when it is missing or malformed: the protected-areas block is then hidden and the rest of the app is unaffected.
  */
-export function loadContext(): Promise<ContextFile | null> {
-  contextPromise ??= fetch(url("context.json"))
+export function loadContext(path = ""): Promise<ContextFile | null> {
+  return once(contextCache, path, () => fetch(url("context.json", path))
     .then((r) => (r.ok ? r.json() : null))
     .then(validateContext)
-    .catch(() => null);
-  return contextPromise;
+    .catch(() => null));
 }
 
-let frpPromise: Promise<unknown | null> | null = null;
+const frpCache = new Map<string, Promise<unknown | null>>();
 /**
  * frp.json (harmonized fire power, 2.4 MB), fetched once and only when the user switches to FRP.
  * Resolves to null when it is missing or malformed: the FRP option is then disabled and the app keeps working.
  * The result, including a failure, is cached: after a failure the app disables the option until the page is reloaded.
  */
-export function loadFrp(): Promise<unknown | null> {
-  frpPromise ??= fetch(url("frp.json"))
+export function loadFrp(path = ""): Promise<unknown | null> {
+  return once(frpCache, path, () => fetch(url("frp.json", path))
     .then((r) => (r.ok ? r.json() : null))
     .then((j) => (j && j.meta && j.meta.months && Array.isArray(j.cells) && j.meta.error_model ? j : null))
-    .catch(() => null);
-  return frpPromise;
+    .catch(() => null));
 }
 
-export async function loadData(): Promise<AppData> {
+/** Everything the first screen of a country needs. Only grid.json is required; the other files are optional. */
+export async function loadData(path = ""): Promise<AppData> {
   const [gridJson, currentJson, burnJson] = await Promise.all([
-    fetch(url("grid.json")).then((r) => r.json()),
-    fetch(url("current.json")).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    fetch(url("burn_history.json")).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<BurnHistory | null>,
+    fetch(url("grid.json", path)).then((r) => r.json()),
+    getJson("current.json", path),
+    getJson("burn_history.json", path) as Promise<BurnHistory | null>,
   ]);
   const grid = H.decodeGrid(gridJson, currentJson);
-  const isFresh = burnJson ? makeFreshTest(burnJson) : () => false;
+  const hasBurnHistory = !!burnJson && typeof burnJson.last_year_minus_2000_b64 === "string";
+  const isFresh = burnJson && hasBurnHistory ? makeFreshTest(burnJson) : () => false;
+  // biome countries: which grid cells make each region preset (Paraguay's river split needs no file)
+  const regionCells = grid.meta.regions?.kind === "biome" ? validRegionCells(await getJson("regions.json", path)) : null;
   let hotspots: Hotspot[] = [];
   try {
-    const txt = await fetch(url("current_hotspots.csv")).then((r) => (r.ok ? r.text() : ""));
+    const txt = await fetch(url("current_hotspots.csv", path)).then((r) => (r.ok ? r.text() : ""));
     const lines = txt.trim().split("\n");
     const cols = lines[0].split(",");
     const col = (n: string) => cols.indexOf(n);
@@ -127,7 +210,7 @@ export async function loadData(): Promise<AppData> {
       return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv };
     });
   } catch { /* hotspots are optional */ }
-  return { grid, current: currentJson ? currentJson.meta : null, currentJson, hotspots, historyPeriod: burnJson?.period ?? "" };
+  return { grid, current: currentJson ? currentJson.meta : null, currentJson, hotspots, historyPeriod: burnJson?.period ?? "", hasBurnHistory, regionCells };
 }
 
 function interp(x: number, xs: number[], ys: number[]) {
@@ -161,7 +244,7 @@ export function bboxOfCells(meta: GridMeta, ids: number[]): [number, number, num
   return [w - d, s - d, e + d, n + d];
 }
 
-/** Approximate area of a set of 0.1-degree cells in km2. */
+/** Approximate area of a set of grid cells in km2. */
 export function areaKm2(meta: GridMeta, ids: number[]) {
   const d = meta.grid.deg;
   return ids.reduce((s, id) => s + (d * 111.32) * (d * 111.32 * Math.cos((H.cellCenter(meta, id)[1] * Math.PI) / 180)), 0);
@@ -194,10 +277,11 @@ export function download(name: string, text: string) {
 
 // ---------------------------------------------------------------- historical hotspots (1-degree gzip blocks)
 interface HotspotIndex { blocks: Record<string, { rows: number; first: string; last: string }> }
-let indexPromise: Promise<HotspotIndex | null> | null = null;
-export function hotspotIndex() {
-  indexPromise ??= fetch(url("hotspots/index.json")).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  return indexPromise;
+const indexCache = new Map<string, Promise<HotspotIndex | null>>();
+/** hotspots/index.json of a country; null when it has no archived hotspot blocks (the download is then not offered). */
+export function hotspotIndex(path = ""): Promise<HotspotIndex | null> {
+  return once(indexCache, path, () => fetch(url("hotspots/index.json", path)).then((r) => (r.ok ? r.json() : null))
+    .then((j) => (j && typeof j.blocks === "object" && j.blocks !== null ? (j as HotspotIndex) : null)).catch(() => null));
 }
 
 const blockOfCell = (meta: GridMeta, idx: number) => {
@@ -234,15 +318,15 @@ async function gunzipText(res: Response) {
 
 /** Archived hotspots (Jul 2002 - Dec 2025) inside the zone cells and month range, as unified CSV rows. */
 export async function historicalHotspotRows(meta: GridMeta, zone: Set<number>, from: number, to: number,
-  onProgress: (done: number, total: number) => void): Promise<string[]> {
-  const index = await hotspotIndex();
+  onProgress: (done: number, total: number) => void, path = ""): Promise<string[]> {
+  const index = await hotspotIndex(path);
   if (!index) return [];
   const blocks = [...new Set([...zone].map((i) => blockOfCell(meta, i)))].filter((b) => index.blocks[b]);
   const out: string[] = [];
   let done = 0;
   onProgress(0, blocks.length);
   for (const b of blocks) {
-    const res = await fetch(url(`hotspots/${b}.csv.gz`));
+    const res = await fetch(url(`hotspots/${b}.csv.gz`, path));
     if (!res.ok) throw new Error(`${b}: HTTP ${res.status}`);
     const lines = (await gunzipText(res)).split("\n");
     for (let k = 1; k < lines.length; k++) {

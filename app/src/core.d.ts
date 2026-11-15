@@ -3,7 +3,8 @@ export interface ClassDef { id: "low" | "normal" | "high" | "extreme"; label: st
 export interface GridMeta {
   grid: { deg: number; lat0: number; lon0: number; rows: number; cols: number };
   months: { first: string; count: number; last: string; viirs_start_index: number };
-  regions: { river_lat: number[]; river_lon: number[]; chaco_south: number };
+  /** Paraguay: the river split (no kind); biome countries: kind "biome" and the region ids / labels */
+  regions: { river_lat: number[]; river_lon: number[]; chaco_south: number; kind?: string; names?: string[]; labels?: Record<string, string> };
   classes: ClassDef[];
   error_model: { c: number; p: number; sys_by_year: Record<string, number> };
   validation: {
@@ -54,9 +55,11 @@ export interface DepartmentRow {
 }
 /** lowSignalMedian: a department whose typical month is below it is ranked by value, not ratio (default 10; 100 for fire power in MW). */
 export function departmentRanking(grid: Grid, departments: DepartmentDef[], m: number, coverage?: number, lowSignalMedian?: number): DepartmentRow[];
-export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null; p90Pct?: number }
+/** area: "country" for the whole country, otherwise the factor region id ("chaco", a biome id) */
+export interface ValidationRow { area: string; mdapePct: number; classAgreementPct: number | null; p90Pct?: number }
 export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
-export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;
+/** countryArea: the country's area id, the key of the country row in frp.json (default "paraguay") */
+export function validationSummary(meta: Partial<GridMeta>, countryArea?: string): ValidationSummary;
 /** data/app/context.json: fire statistics per protected area (WDPA); sparse monthly series, no geometry. */
 export interface ProtectedSeries { m: number[]; n: number[]; frp: number[] }
 export interface ProtectedAreaRecord extends ProtectedSeries {
