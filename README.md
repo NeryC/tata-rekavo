@@ -176,6 +176,30 @@ The country median error (7.4 %) is under the 15 % gate. The verdict class match
 - **Cell level is coarse.** A 0.25° cell has 34.6 % median error and a 0.1° cell 47.0 %; the pilot uses a 0.25° grid for that reason.
 - **Biomes are an approximation.** Factor regions are RESOLVE biomes of the hotspot's 0.05° cell, not a fire-behaviour classification.
 
+## More countries (Uruguay, Peru, Ecuador)
+
+Same pipeline and commands as Bolivia (`--country URY|PER|ECU --data data/raw/<ISO3> --out data/app/<ISO3>`), each with its own grid, department ranking (geoBoundaries ADM1) and factor regions from `countries.json`. No burn history and no per-hotspot export. Cross-border areas (Pantanal, Chaco, Amazon) are cut at the national border: a country's area covers only its own side.
+
+### Uruguay
+
+0.1° grid (50 × 55, 1,728 cells with hotspots), 19 departments, FIRMS archives 2000–2025 (97,392 hotspots scanned) plus the 2026 Area API data. Only one of the four biomes in the bounding box has the 500 vegetation hotspots a factor region needs (tropical and subtropical grasslands, savannas and shrublands: 95,028 hotspots, the "campos"; the others have 125, 99 and 9), so the biome is the whole country: the app offers no separate preset for it and the factors are the country's.
+
+| Level | Median error | 90th pct error | Bias |
+|---|---|---|---|
+| Uruguay × month | 21.1 % | 70.6 % | 0.6 % |
+| 1° block × month | 24.2 % | 63.2 % | 0.6 % |
+| 0.25° cell × month | 36.9 % | 100 % | 0.6 % |
+| 0.1° cell × month | 58.3 % | 106.7 % | 0.6 % |
+
+The verdict class matches the one VIIRS would give in 71.3 % of months (country), 69.1 % for 1° blocks. FRP (`frp.json`, experimental): 26.4 %. Mean 2013–2025 vs 2003–2011: naive record ×1.98, harmonized ×0.65.
+
+**Uruguay limitations.**
+
+- **The country median error (21.1 %) is above the 15 % gate.** Uruguay has few fires (a median of 168 VIIRS S-NPP hotspots a month since 2013, 10 in the quietest month), so the monthly ratio between sensors is noisy and the Poisson error of the small counts dominates. The verdict is shown with its error band; read the band, not the point value, and treat the class as indicative (it matches VIIRS in 71 % of months, against 90 % for Bolivia).
+- **Factor fallback.** The country factor of 5 calendar months for Aqua and 8 for Terra rests on fewer than 500 clean overlap hotspots (grid.json `factor_fallback`).
+- **Back-extrapolation is biased.** Calibrating on 2019–2025 and predicting 2012–2018 overestimates VIIRS S-NPP by +17, +20, +19, +15, +16 and +10 % in 2012–2017 (−10 % in 2018). The error model adds a systematic term for the MODIS-only years.
+- **Cell level is noisy.** Use 1° blocks or departments, not single 0.1° cells (58 % median error).
+
 ## Limitations
 
 - **2002–2011 cannot be checked directly**, because there is no VIIRS for those years. The closest evidence is the back-extrapolation test above.
@@ -202,6 +226,7 @@ The country median error (7.4 %) is under the 15 % gate. The verdict class match
 - **RESOLVE Ecoregions 2017** (846 ecoregions in 14 biomes): https://storage.googleapis.com/teow2016/Ecoregions2017.zip (via https://ecoregions.appspot.com/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the factor regions of the countries outside Paraguay: clipped to Latin America, dissolved into biomes and rasterized at 0.05° (`data/ext/biomes_latam.npz`, see `data/ext/README.md`). Paraguay keeps its Chaco / Oriental split.
   Citation: Dinerstein, E., Olson, D., Joshi, A., Vynne, C., Burgess, N. D., Wikramanayake, E., et al. (2017). An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm. *BioScience* 67(6): 534-545. https://doi.org/10.1093/biosci/bix014
 - **geoBoundaries** gbOpen, Bolivia ADM1 (departments): https://www.geoboundaries.org/ (API: https://www.geoboundaries.org/api/current/gbOpen/BOL/ADM1/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the Bolivia department ranking and area selection; boundaries are simplified. Same citation as above.
+- **geoBoundaries** gbOpen, Uruguay ADM1 (departments): https://www.geoboundaries.org/api/current/gbOpen/URY/ADM1/. Licence: CC BY 4.0. Retrieved 2026-11-15. Same use and citation as Bolivia.
 - **Indigenous territories:** not included yet. Next step: add them as a second context layer, with fire statistics only, if a source with terms that allow it is found.
 
 ## Use of AI

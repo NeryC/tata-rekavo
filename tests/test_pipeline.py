@@ -334,18 +334,25 @@ def test_departments_real_data():
     assert len(seen) / len(grid_ids) >= 0.99
 
 
-BOL_DEPARTMENTS = {"beni": "Beni", "chuquisaca": "Chuquisaca", "cochabamba": "Cochabamba", "la-paz": "La Paz", "oruro": "Oruro",
-                   "pando": "Pando", "potosi": "Potosí", "santa-cruz": "Santa Cruz", "tarija": "Tarija"}
+DEPARTMENTS = {
+    "BOL": {"beni": "Beni", "chuquisaca": "Chuquisaca", "cochabamba": "Cochabamba", "la-paz": "La Paz", "oruro": "Oruro",
+            "pando": "Pando", "potosi": "Potosí", "santa-cruz": "Santa Cruz", "tarija": "Tarija"},
+    "URY": {"artigas": "Artigas", "canelones": "Canelones", "cerro-largo": "Cerro Largo", "colonia": "Colonia", "durazno": "Durazno",
+            "flores": "Flores", "florida": "Florida", "lavalleja": "Lavalleja", "maldonado": "Maldonado", "montevideo": "Montevideo",
+            "paysandu": "Paysandú", "rio-negro": "Río Negro", "rivera": "Rivera", "rocha": "Rocha", "salto": "Salto",
+            "san-jose": "San José", "soriano": "Soriano", "tacuarembo": "Tacuarembó", "treinta-y-tres": "Treinta y Tres"},
+}
 
 
-def test_departments_real_data_bolivia():
-    gj = ROOT / "data" / "ext" / "bol_adm1.geojson"
-    grid_path = ROOT / "data" / "app" / "BOL" / "grid.json"
+@pytest.mark.parametrize("iso3", sorted(DEPARTMENTS))
+def test_departments_real_data_other_countries(iso3):
+    gj = ROOT / "data" / "ext" / f"{iso3.lower()}_adm1.geojson"
+    grid_path = ROOT / "data" / "app" / iso3 / "grid.json"
     if not gj.exists() or not grid_path.exists():
-        pytest.skip("data/ext/bol_adm1.geojson or data/app/BOL/grid.json not present")
+        pytest.skip(f"data/ext/{gj.name} or data/app/{iso3}/grid.json not present")
     grid = json.loads(grid_path.read_text(encoding="utf-8"))
-    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, load_country("BOL"))
-    assert {d["id"]: d["name"] for d in deps} == BOL_DEPARTMENTS    # slugs without accents, display names with them
+    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, load_country(iso3))
+    assert {d["id"]: d["name"] for d in deps} == DEPARTMENTS[iso3]    # slugs without accents, display names with them
     seen = set()
     for d in deps:
         assert d["cells"], d["id"]
@@ -372,6 +379,22 @@ def test_region_cells_bolivia_cover_the_grid_once():
     cell = lambda lat, lon: int((lat - g["lat0"]) // g["deg"]) * g["cols"] + int((lon - g["lon0"]) // g["deg"])
     assert cell(-16.5, -68.1) in cells["montane-grasslands-shrublands"]           # La Paz, Altiplano
     assert cell(-11.0, -66.0) in cells["tropical-subtropical-moist-broadleaf-forests"]   # Riberalta, Amazon
+
+
+@pytest.mark.parametrize("iso3", ["URY"])
+def test_region_cells_other_countries_cover_the_grid_once(iso3):
+    grid_path = ROOT / "data" / "app" / iso3 / "grid.json"
+    if not grid_path.exists() or not Path(firms_pipeline.BIOMES_PATH).exists():
+        pytest.skip(f"data/app/{iso3}/grid.json or data/ext/biomes_latam.npz not present")
+    cfg = load_country(iso3)
+    grid = json.loads(grid_path.read_text(encoding="utf-8"))
+    cells = firms_pipeline.build_region_cells(grid["meta"]["grid"], cfg)
+    assert list(cells) == cfg.region_names                # explicit names in countries.json: every region has cells
+    assert grid["meta"]["regions"]["names"] == cfg.region_names
+    flat = [c for v in cells.values() for c in v]
+    assert len(flat) == len(set(flat))                    # no cell in two regions
+    data = {c[0] for c in grid["cells"]}
+    assert len(data & set(flat)) / len(data) >= 0.99      # coastal cells mostly over the sea belong to no biome (as test_contract)
 
 
 # ----------------------------------------------------------------------------- season climatology
