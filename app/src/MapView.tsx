@@ -59,6 +59,10 @@ interface Props {
   onUserMove: () => void;
   /** the map is back on the area's own framing */
   onViewReset: () => void;
+  /** share a hotspot for verification (from its popup) */
+  onShareHotspot: (h: { lat: number; lon: number; date: string; at: string | null }) => void;
+  /** a hotspot opened from a shared link: centred and ringed on the map */
+  focus: { lat: number; lon: number } | null;
 }
 
 type GJ = GeoJSON.FeatureCollection;
@@ -130,6 +134,7 @@ export default function MapView(p: Props) {
         m.addSource("zone", { type: "geojson", data: empty });
         m.addSource("draft", { type: "geojson", data: empty });
         m.addSource("hotspots", { type: "geojson", data: empty });
+        m.addSource("focus", { type: "geojson", data: empty });
         m.addLayer({
           id: "cells", type: "fill", source: "cells",
           paint: {
@@ -144,6 +149,8 @@ export default function MapView(p: Props) {
         m.addLayer({ id: "hotspots-new", type: "circle", source: "hotspots", filter: ["==", ["get", "fresh"], 1],
           paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 4, 9, 7], "circle-color": "#2a78d6",
                    "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.2 } });
+        m.addLayer({ id: "focus", type: "circle", source: "focus",
+          paint: { "circle-radius": 14, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#0b0b0b", "circle-stroke-width": 2.5 } });
         m.addLayer({ id: "zone", type: "line", source: "zone",
           paint: { "line-color": "#0b0b0b", "line-width": 2, "line-dasharray": [2, 1.5] } });
         m.addLayer({ id: "draft-line", type: "line", source: "draft", filter: ["==", ["geometry-type"], "LineString"],
@@ -180,10 +187,17 @@ export default function MapView(p: Props) {
           const d = describeHotspot({ date: q.date, at: nul(q.at), satellite: nul(q.satellite), instrument: nul(q.instrument),
             confidence: nul(q.confidence), product: nul(q.product) }, lang, props.current.timeZone, t);
           popup.remove();
-          hotspotPopup.setLngLat(f.geometry.coordinates as [number, number])
-            .setHTML(`<b>${esc(t.hsPopupTitle)}</b><br>${esc(d.when)}<br>${esc(t.hsSensor)}: ${esc(d.sensor)}<br>`
-              + `${esc(t.hsConfidence)}: ${esc(d.confidence)}<br><span>NASA FIRMS · ${esc(d.product)}</span>`)
-            .addTo(m);
+          const [lon, lat] = f.geometry.coordinates as [number, number];
+          const el = document.createElement("div");
+          el.innerHTML = `<b>${esc(t.hsPopupTitle)}</b><br>${esc(d.when)}<br>${esc(t.hsSensor)}: ${esc(d.sensor)}<br>`
+            + `${esc(t.hsConfidence)}: ${esc(d.confidence)}<br><span>NASA FIRMS · ${esc(d.product)}</span><br>`;
+          const share = document.createElement("button");
+          share.type = "button";
+          share.className = "hs-share";
+          share.textContent = t.vfShare;
+          share.onclick = () => props.current.onShareHotspot({ lat, lon, date: q.date, at: nul(q.at) });
+          el.appendChild(share);
+          hotspotPopup.setLngLat([lon, lat]).setDOMContent(el).addTo(m);
         };
         for (const id of ["hotspots", "hotspots-new"]) {
           m.on("click", id, showHotspot);
@@ -302,6 +316,17 @@ export default function MapView(p: Props) {
     if (!m || !ready) return;
     m.fitBounds(p.zoneBBox, { padding: 40, bearing: 0, pitch: 0, duration: 600 });
   }, [ready, p.zoneBBox, p.viewNonce]);
+
+  // after the zone framing, so a shared hotspot wins on the first load
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    const f = p.focus;
+    (m.getSource("focus") as maplibregl.GeoJSONSource).setData(f
+      ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [f.lon, f.lat] } }] }
+      : empty);
+    if (f) m.flyTo({ center: [f.lon, f.lat], zoom: Math.max(m.getZoom(), 10), duration: 800 });
+  }, [ready, p.focus]);
 
   // keep the home button tooltip in the current language
   useEffect(() => {

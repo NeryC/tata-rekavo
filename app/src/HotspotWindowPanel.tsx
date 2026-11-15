@@ -18,6 +18,7 @@ interface Props {
   zone: Set<number>;
   zoneLabel: string;
   ready: boolean;
+  onShare: (h: Hotspot) => void;
 }
 
 /** What the map points show (the selected month or a rolling window), their coverage and an accessible list of them. */
@@ -54,11 +55,12 @@ export default function HotspotWindowPanel(p: Props) {
             {inZone.length > LIST_MAX && <p className="note">{t.hsListMore(num(LIST_MAX), num(inZone.length))}</p>}
             <div className="table-scroll">
               <table>
-                <thead><tr><th scope="col">{t.hsWhen}</th><th scope="col">{t.hsSensor}</th><th scope="col">{t.hsConfidence}</th><th scope="col">{t.hsProduct}</th></tr></thead>
+                <thead><tr><th scope="col">{t.hsWhen}</th><th scope="col">{t.hsSensor}</th><th scope="col">{t.hsConfidence}</th><th scope="col">{t.hsProduct}</th><th scope="col"><span className="sr-only">{t.vfShare}</span></th></tr></thead>
                 <tbody>
                   {shown.map((h, i) => {
                     const d = describeHotspot(h, lang, p.timeZone, t);
-                    return <tr key={i}><td>{d.when}</td><td>{d.sensor}</td><td>{d.confidence}</td><td>{d.product}</td></tr>;
+                    return <tr key={i}><td>{d.when}</td><td>{d.sensor}</td><td>{d.confidence}</td><td>{d.product}</td>
+                      <td><button type="button" className="ghost small" aria-label={t.vfShareOne(d.when)} onClick={() => p.onShare(h)}>{t.vfShare}</button></td></tr>;
                   })}
                 </tbody>
               </table>

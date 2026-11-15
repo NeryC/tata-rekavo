@@ -9,7 +9,8 @@ import ProtectedAreas from "./ProtectedAreas";
 import Glance, { type CaseLink } from "./Glance";
 import WeatherPanel from "./WeatherPanel";
 import HotspotWindowPanel from "./HotspotWindowPanel";
-import { inWindow, type HotspotWindow } from "./hotspotTime";
+import { describeHotspot, findShared, formatInstant, inWindow, shareRef, type HotspotRef, type HotspotWindow } from "./hotspotTime";
+import SharedHotspotCard from "./SharedHotspotCard";
 import { historyPeriodLabel } from "./historyPeriod";
 import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
@@ -120,6 +121,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   // the map points: the selected month (default) or a rolling window counted back from `now`
   const [win, setWin] = useState<HotspotWindow>("month");
   const [now, setNow] = useState(() => new Date());
+  // a hotspot shared for verification (URL param f)
+  const [shared, setShared] = useState<HotspotRef | null>(null);
   const [calMode, setCalMode] = useState<CalMode>("ratio");
   const [busy, setBusy] = useState<string | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
@@ -164,7 +167,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
       } else setPolygon(r.poly);
       setMonth(r.month);
       setRange(r.range);
-      setCalMode(r.cal); setNaive(r.naive); setMetric(r.metric); setWin(link.win ?? "month");
+      setCalMode(r.cal); setNaive(r.naive); setMetric(r.metric); setWin(link.win ?? "month"); setShared(link.hs ?? null);
       if (!alive) return;
       setData(d);
       // second stage: hotspots and burn history arrive after the verdict is on screen
@@ -312,6 +315,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     const s: ShareState = { lang, country: country.iso3, cal: calMode, naive, newOnly };
     if (metric === "frp") s.metric = "frp";
     if (win !== "month") s.win = win;
+    if (shared) s.hs = shared;
     if (zoneKind === "custom") {
       if (coords) s.c = coords; else if (polygon) s.poly = polygon;
       if (coords || polygon) s.zone = "custom";
@@ -321,7 +325,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     if (month >= 0 && month !== lastI) s.m = indexToMonth(first, month);
     if (range[0] !== defStart || range[1] !== lastI) s.range = [indexToMonth(first, range[0]), indexToMonth(first, range[1])];
     return encodeState(s);
-  }, [data, lang, country, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric, win]);
+  }, [data, lang, country, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric, win, shared]);
 
   useEffect(() => {
     if (shareQs === null) return; // never overwrite the incoming URL before it has been restored
@@ -355,7 +359,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     setZoneKind(country.area); setDepartmentId(null); setPolygon(null); setCoords(null);
     setMonth(lastM);
     setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
-    setCalMode("ratio"); setNaive(false); setNewOnly(false); setWin("month"); setMetric("count"); setDlError(null);
+    setCalMode("ratio"); setNaive(false); setNewOnly(false); setWin("month"); setShared(null); setMetric("count"); setDlError(null);
     setViewNonce((n) => n + 1);
     setMapMoved(false);
   }
@@ -546,6 +550,26 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     const text = alertMessage();
     try { await navigator.clipboard.writeText(text); flash(t.alertCopied); } catch { setManualUrl(text); }
   };
+  // a hotspot for someone to check on the ground: its link (area, month, the hotspot) and a plain-text description
+  const shareHotspot = async (h: { lat: number; lon: number; date: string; at: string | null }) => {
+    const ref = shareRef(h);
+    setShared(ref);
+    const qs = new URLSearchParams(shareQs ?? "");
+    qs.set("f", `${ref.lat},${ref.lon},${ref.t}`);
+    const link = `${window.location.origin}${window.location.pathname}?${qs.toString().replace(/%2C/gi, ",")}`;
+    const found = findShared(data.hotspots, ref)[0];
+    const tz = country.tz ?? "America/Asuncion";
+    const d = describeHotspot(found ?? { ...h, satellite: null, instrument: null, confidence: null, product: null }, lang, tz, t);
+    const coord = (x: number) => x.toFixed(2);
+    const updated = data.current?.generated ? formatInstant(data.current.generated, lang, tz) : "—";
+    const text = t.vfText(d.when, d.sensor, coord(ref.lat), coord(ref.lon), updated, link);
+    const phone = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+    if (phone && typeof navigator.share === "function") {
+      try { await navigator.share({ text }); return; } catch (e) { if ((e as Error).name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(text); flash(t.vfCopied); } catch { setManualUrl(text); }
+  };
+  const sharedMatches = shared && hotspotsReady ? findShared(data.hotspots, shared) : null;
   const seasonYearNow = H.monthOf(countGrid.meta, countGrid.nMonths - 1).year;
   const cases: CaseLink[] = [
     ...(country.iso3 === "PRY" ? [
@@ -602,6 +626,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
         {header}
         <main>
           <aside className="panel">
+            {shared && <SharedHotspotCard shared={shared} matches={sharedMatches} timeZone={country.tz ?? "America/Asuncion"}
+              generated={data.current?.generated} onClose={() => setShared(null)} />}
             <section className="sec-area">
               <h2>{t.step1}</h2>
               <div className={presetIds.length > 3 ? "seg area many" : "seg area"} role="group" aria-label={t.areaPresets}>
@@ -735,7 +761,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
             )}
 
             <HotspotWindowPanel win={win} onWin={(w) => { setNow(new Date()); setWin(w); }} points={mapHotspots} untimed={untimed} now={now}
-              generated={data.current?.generated} timeZone={country.tz ?? "America/Asuncion"} zone={zoneSet} zoneLabel={zoneLabel} ready={hotspotsReady} />
+              generated={data.current?.generated} timeZone={country.tz ?? "America/Asuncion"} zone={zoneSet} zoneLabel={zoneLabel} ready={hotspotsReady}
+              onShare={(h) => void shareHotspot(h)} />
 
             {data.hasBurnHistory && <section className="newplaces">
               <h2><span className="dot-new" aria-hidden />{t.newTitle}</h2>
@@ -892,6 +919,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
             pointsPeriod={win === "24h" ? t.win24h.toLowerCase() : win === "7d" ? t.win7d.toLowerCase() : undefined} timeZone={country.tz ?? "America/Asuncion"} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setDepartmentId(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)}
+            onShareHotspot={(h) => void shareHotspot(h)} focus={shared ? { lat: shared.lat, lon: shared.lon } : null}
             onUserMove={() => setMapMoved(true)} onViewReset={() => setMapMoved(false)} />
           </Suspense>
         </main>

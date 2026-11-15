@@ -198,3 +198,13 @@ test("recent map window round-trips; old links and unknown values show the month
   assert.deepEqual(decodeState("w=30d"), {});
   assert.deepEqual(decodeState("w=month"), {});
 });
+
+test("a shared hotspot reference round-trips and is validated", () => {
+  assert.equal(encodeState({ hs: { lat: -24.48, lon: -54.65, t: "202611130431" } }), "f=-24.48,-54.65,202611130431");
+  assert.deepEqual(decodeState("f=-24.48,-54.65,202611130431"), { hs: { lat: -24.48, lon: -54.65, t: "202611130431" } });
+  assert.deepEqual(decodeState("f=-24.48,-54.65,20261113"), { hs: { lat: -24.48, lon: -54.65, t: "20261113" } });
+  assert.deepEqual(decodeState("f=10,10,202611130431"), {}); // outside the country
+  assert.deepEqual(decodeState("f=-24.48,-54.65,2026"), {});
+  assert.deepEqual(decodeState("f=-24.48,-54.65"), {});
+  assert.deepEqual(decodeState("f=a,b,202611130431"), {});
+});
