@@ -83,6 +83,7 @@
     "burn_history": false,
     "mask": {"deg": 0.05, "rows": 100, "cols": 110},
     "departments": {
+      "mask_cells": true,
       "names": {
         "artigas": "Artigas", "canelones": "Canelones", "cerro-largo": "Cerro Largo", "colonia": "Colonia",
         "durazno": "Durazno", "flores": "Flores", "florida": "Florida", "lavalleja": "Lavalleja",
@@ -114,6 +115,7 @@
     "burn_history": false,
     "mask": {"deg": 0.05, "rows": 370, "cols": 260},
     "departments": {
+      "mask_cells": true,
       "merge": {"el-callao": "lima", "municipalidad-metropolitana-de-lima": "lima"},
       "names": {
         "amazonas": "Amazonas", "ancash": "Áncash", "apurimac": "Apurímac", "arequipa": "Arequipa", "ayacucho": "Ayacucho",
@@ -123,6 +125,40 @@
         "san-martin": "San Martín", "tacna": "Tacna", "tumbes": "Tumbes", "ucayali": "Ucayali"
       },
       "note": "Simplified department boundaries (geoBoundaries gbOpen PER ADM1). Lima is the department of Lima: the Lima region, the Metropolitan Municipality of Lima (Lima Province) and El Callao (a 146 km2 province smaller than one 0.25-degree cell) are merged into it (24 units). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
+    }
+  },
+  "ECU": {
+    "name": "Ecuador",
+    "firms_name": "Ecuador",
+    "area": "ecuador",
+    "bbox": [-81.1, -5.1, -75.1, 1.5],
+    "deg": 0.1,
+    "lat0": -5.1,
+    "lon0": -81.1,
+    "rows": 66,
+    "cols": 60,
+    "regions": {
+      "kind": "biome",
+      "source": "data/ext/biomes_latam.npz",
+      "min_hotspots": 500,
+      "names": ["tropical-subtropical-moist-broadleaf-forests", "tropical-subtropical-dry-broadleaf-forests",
+                "montane-grasslands-shrublands", "mangroves"]
+    },
+    "export_hotspots": false,
+    "burn_history": false,
+    "mask": {"deg": 0.05, "rows": 132, "cols": 120},
+    "departments": {
+      "mask_cells": true,
+      "drop": ["galapagos"],
+      "names": {
+        "azuay": "Azuay", "bolivar": "Bolívar", "canar": "Cañar", "carchi": "Carchi", "chimborazo": "Chimborazo",
+        "cotopaxi": "Cotopaxi", "el-oro": "El Oro", "esmeraldas": "Esmeraldas", "guayas": "Guayas", "imbabura": "Imbabura",
+        "loja": "Loja", "los-rios": "Los Ríos", "manabi": "Manabí", "morona-santiago": "Morona Santiago", "napo": "Napo",
+        "orellana": "Orellana", "pastaza": "Pastaza", "pichincha": "Pichincha", "santa-elena": "Santa Elena",
+        "santo-domingo-de-los-tsachilas": "Santo Domingo de los Tsáchilas", "sucumbios": "Sucumbíos", "tungurahua": "Tungurahua",
+        "zamora-chinchipe": "Zamora Chinchipe"
+      },
+      "note": "Simplified province boundaries (geoBoundaries gbOpen ECU ADM1), mainland only: the Galápagos province (outside the grid) is left out, 23 provinces. A cell belongs to the province containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest province."
     }
   }
 }
