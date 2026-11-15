@@ -37,6 +37,22 @@ Derived files, built with `python firms_pipeline.py build-regions --country BOL 
 - `data/app/BOL/regions.json` (not from geoBoundaries: from `biomes_latam.npz`, below): the grid cells of each factor region (biome),
   used by the app for the region presets. A cell belongs to the biome of most of its 25 0.05-degree raster cells.
 
+## ury_adm1.geojson
+
+Uruguay first-level administrative boundaries (19 departments).
+
+- Source: geoBoundaries gbOpen, URY ADM1, `simplifiedGeometryGeoJSON` file (the link returned by the API), kept as downloaded
+  by `fetch_boundaries` (425,451 bytes; properties `shapeName`, `shapeISO`, `shapeID`, `shapeGroup`, `shapeType`).
+- API: https://www.geoboundaries.org/api/current/gbOpen/URY/ADM1/
+- Retrieved: 2026-11-15
+- License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+- Attribution: Runfola, D. et al. (2020) geoBoundaries: A global database of political administrative boundaries.
+  PLoS ONE 15(4): e0231866. https://doi.org/10.1371/journal.pone.0231866
+
+Derived files, built with `python firms_pipeline.py build-regions --country URY --out data/app/URY`: `departments.json` (display names
+with accents, ASCII slugs as ids, each 0.1-degree grid cell assigned to the department containing its centre, every cell assigned) and
+`regions.json` (from `biomes_latam.npz`: one region, the grassland biome, which covers the whole country).
+
 ## protected_areas.geojson (private, not committed) and `data/app/context.json`
 
 Protected areas of Paraguay from the WDPA / WD-OECM (November 2026 release, 137 polygons, all STATUS = Designated).
