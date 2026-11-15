@@ -20,7 +20,12 @@
    "example": [
     -22.35,
     -60.03
-   ]
+   ],
+   "files": {
+    "burnHistory": true,
+    "hotspotArchive": true,
+    "context": true
+   }
   },
   {
    "iso3": "BOL",
@@ -41,7 +46,12 @@
    "example": [
     -16.37,
     -60.96
-   ]
+   ],
+   "files": {
+    "burnHistory": false,
+    "hotspotArchive": false,
+    "context": false
+   }
   },
   {
    "iso3": "ECU",
@@ -63,7 +73,12 @@
     -0.9,
     -77.8
    ],
-   "pilot": true
+   "pilot": true,
+   "files": {
+    "burnHistory": true,
+    "hotspotArchive": true,
+    "context": false
+   }
   },
   {
    "iso3": "PER",
@@ -84,7 +99,12 @@
    "example": [
     -9,
     -74.5
-   ]
+   ],
+   "files": {
+    "burnHistory": true,
+    "hotspotArchive": true,
+    "context": false
+   }
   },
   {
    "iso3": "URY",
@@ -106,7 +126,12 @@
     -31.7,
     -55.98
    ],
-   "pilot": true
+   "pilot": true,
+   "files": {
+    "burnHistory": true,
+    "hotspotArchive": true,
+    "context": false
+   }
   }
  ]
 }

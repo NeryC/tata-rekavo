@@ -115,7 +115,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const [dlError, setDlError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<number | null>(null);
   // archived hotspot blocks (hotspots/index.json): null while loading; false when the country has none (no full download)
-  const [hasArchive, setHasArchive] = useState<boolean | null>(null);
+  const [hasArchive, setHasArchive] = useState<boolean | null>(country.files?.hotspotArchive === false ? false : null);
   const [viewNonce, setViewNonce] = useState(0);
   const [mapMoved, setMapMoved] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -131,9 +131,9 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     const depsLoad = loadDepartments(path); // lazy and optional: starts with the grid, never blocks it
     void depsLoad.then(setDepartments);
     void loadSeason(path).then(setSeason);
-    void loadContext(path).then(setContext);
+    if (country.files?.context !== false) void loadContext(path).then(setContext); // protected areas: Paraguay only
     let alive = true;
-    loadData(path, country.iso3).then(async ({ data: d, extras }) => {
+    loadData(path, country.iso3, country.files).then(async ({ data: d, extras }) => {
       // a shared department link has to wait for departments.json, or it would restore as the whole country
       const link = decodeState(window.location.search, (iso3) => (iso3 === country.iso3 ? country.bbox : undefined));
       const deps = link.zone === "department" ? await depsLoad : null;
@@ -251,7 +251,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
 
   // estimated size of the hotspot download for this area and range
   useEffect(() => {
-    if (!countGrid || !data) return;
+    if (!countGrid || !data || country.files?.hotspotArchive === false) return; // no archive: the full download is not offered
     let alive = true;
     hotspotIndex(path).then((idx) => { // warm the block index while the user decides
       if (!alive) return;
@@ -261,7 +261,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
       setEstimate(Math.round(hist + recent));
     });
     return () => { alive = false; };
-  }, [countGrid, data, zoneCells, zoneSet, range, path]);
+  }, [countGrid, data, zoneCells, zoneSet, range, path, country.files]);
 
   // the state a shared link carries; null until the initial restore has run
   const shareQs = useMemo(() => {
@@ -339,7 +339,11 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     <select className={`country country-${where}`} value={country.iso3} aria-label={t.countryLabel} title={t.countryLabel}
       onChange={(e) => {
         const next = countries.find((c) => c.iso3 === e.target.value);
-        if (next && next.iso3 !== country.iso3) onCountry(next, data && month >= 0 && month !== data.grid.nMonths - 1 ? indexToMonth(data.grid.meta.months.first, month) : null);
+        if (!next || next.iso3 === country.iso3) return;
+        // keep the month: from the state once the data is in, from the link while it is still loading
+        const m = data && month >= 0 ? (month !== data.grid.nMonths - 1 ? indexToMonth(data.grid.meta.months.first, month) : null)
+          : decodeState(window.location.search).m ?? null;
+        onCountry(next, m);
       }}>
       {countries.map((c) => <option key={c.iso3} value={c.iso3}>{c.pilot ? t.pilotCountry(c.name[lang]) : c.name[lang]}</option>)}
     </select>

@@ -42,6 +42,8 @@ export interface CountryInfo {
   example?: [number, number];
   /** country median error above the 15 % gate: the selector tags it as a pilot */
   pilot?: boolean;
+  /** optional files the country ships (from the index); a missing entry means "unknown: try it" */
+  files?: { burnHistory: boolean; hotspotArchive: boolean; context: boolean };
 }
 export interface CountriesIndex { default: string; countries: CountryInfo[] }
 
@@ -232,8 +234,9 @@ export interface HotspotExtras { hotspots: Hotspot[]; historyPeriod: string; has
  * the map points, "fire in new places" and the season curve fill in when `extras` resolves (`data` has none until then).
  * Only grid.json is required; the other files are optional.
  */
-export async function loadData(path = "", iso3?: string): Promise<{ data: AppData; extras: Promise<HotspotExtras> }> {
-  const burnLoad = getJson("burn_history.json", path) as Promise<BurnHistory | null>; // starts now, awaited in stage 2
+export async function loadData(path = "", iso3?: string, files?: CountryInfo["files"]): Promise<{ data: AppData; extras: Promise<HotspotExtras> }> {
+  // starts now, awaited in stage 2; never asked for when the index says the country has none
+  const burnLoad = (files?.burnHistory === false ? Promise.resolve(null) : getJson("burn_history.json", path)) as Promise<BurnHistory | null>;
   const [gridJson, { currentJson, hotspotsUrl }] = await Promise.all([
     fetch(url("grid.json", path)).then((r) => r.json()),
     currentSource(path, iso3),

@@ -4,6 +4,7 @@
 // test_contract.mjs checks that the written file is in sync with countries.json.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const DEFAULT_ISO3 = "PRY";
 // display extras the pipeline config does not carry: Spanish name (when it differs), time zone of the "updated" line,
@@ -29,13 +30,19 @@ export function buildIndex(config, dataDir) {
     countries.push({
       iso3, path, area: c.area, name: { en: c.name, es: x.nameEs ?? c.name }, bbox: c.bbox,
       ...(x.tz ? { tz: x.tz, tzCity: x.tzCity } : {}), ...(x.example ? { example: x.example } : {}), ...(x.pilot ? { pilot: true } : {}),
+      // optional files the country ships, so the app never asks for one it does not have
+      files: {
+        burnHistory: existsSync(join(dataDir, path, "burn_history.json")),
+        hotspotArchive: existsSync(join(dataDir, path, "hotspots", "index.json")),
+        context: existsSync(join(dataDir, path, "context.json")),
+      },
     });
   }
   countries.sort((a, b) => (a.iso3 === DEFAULT_ISO3 ? -1 : b.iso3 === DEFAULT_ISO3 ? 1 : a.iso3.localeCompare(b.iso3)));
   return { default: DEFAULT_ISO3, countries };
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/").replace(/^(?=[A-Za-z]:)/, "/")}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const dataDir = process.argv[2] || "data/app";
   const config = JSON.parse(readFileSync("countries.json", "utf8"));
   const index = buildIndex(config, dataDir);

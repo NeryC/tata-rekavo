@@ -4,6 +4,7 @@
 // Usage: node summary.mjs [data/app] [out file, default <data dir>/summary.json]
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import * as H from "./harmonized.js";
 
 const readJson = (f) => { try { return JSON.parse(readFileSync(f, "utf8")); } catch { return null; } };
@@ -40,7 +41,7 @@ export function buildSummary(dataDir) {
   return { generated: new Date().toISOString(), countries };
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/").replace(/^(?=[A-Za-z]:)/, "/")}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const dataDir = process.argv[2] || "data/app";
   const out = process.argv[3] || join(dataDir, "summary.json");
   const s = buildSummary(dataDir);
