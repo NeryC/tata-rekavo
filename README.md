@@ -293,6 +293,10 @@ The verdict class matches the one VIIRS would give in 71.3 % of months (country)
 
 The data pipeline, the validation analysis, the reference client module, the figures and parts of this README were produced with the assistance of an AI tool (a large language model) and reviewed by the team. AI-assisted figures carry a note in their caption. No NASA logos or branding are used.
 
-## Team
-
-Tata Rekavo — Jesús Emanuel Fernández Sosa, Mario Salvador Maldonado Cañete, Nery Alberto Cano Ortigoza.
+   ## Team
+   
+   **Tata Rekavo** is a multidisciplinary team from Paraguay, combining data engineering, artificial intelligence, and on-the-ground physical validation:
+   
+   - **Nery Alberto Cano Ortigoza** | *Lead Data Engineer & Architect*. Designed and implemented the core harmonization pipeline, sensor outage handling, and the multi-country calibration framework.
+   - **Jesús Emanuel Fernández Sosa** | *AI & UX Strategy*. Led the integration of the "Modo Catador" (Physical Validation) layer, translating statistical uncertainty into actionable insights for field decision-makers. Authored project documentation and submission strategy.
+   - **Mario Salvador Maldonado Cañete** | *Physical Validation & Domain Expert*. Provides critical on-the-ground validation of fire patterns in the Chaco and Oriental regions, ensuring that algorithmic outputs align with real-world fire behavior.
