@@ -71,6 +71,11 @@ main { flex: 1; display: grid; grid-template-columns: 500px 1fr; min-height: 0; 
 .panel > section { padding: 18px 0; border-bottom: 1px solid var(--rule); }
 .panel h2 { margin: 0 0 10px; font-size: 18px; font-weight: 700; font-stretch: 106%; line-height: 1.25; }
 .panel h3 { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+.glance-more, .history-section > details, .period > details { margin-top: 0; }
+.glance-more > summary h2, .history-section > details > summary h2, .period > details > summary h2 { display: inline; }
+.history-section > details > section { padding-top: 18px; }
+.history-section > details > section + section { border-top: 1px solid var(--rule); margin-top: 18px; }
+.v-context { color: inherit; font-size: 13px; line-height: 1.4; margin: 5px 0 12px; }
 .h2row { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .h2row h2 { margin: 0; }
 .meta { margin-top: 10px; font-size: 14px; color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: baseline; }
@@ -137,6 +142,7 @@ details p { margin-top: 6px; color: var(--ink-2); max-width: 62ch; }
 .v-main { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
 .v-ratio { font-size: 64px; font-weight: 800; font-stretch: 122%; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .v-of { font-size: 16px; opacity: 0.92; }
+.v-comparison { margin-top: 4px; font-size: 15px; }
 .v-scale { margin: 14px 0 12px; }
 .v-track { position: relative; display: flex; gap: 3px; height: 10px; }
 .v-track span { flex: 1; border-radius: 2px; background: rgba(255, 255, 255, 0.3); }
@@ -282,7 +288,6 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
   .panel > .sec-area { order: 1; }
   .panel > .sec-month { order: 2; border-bottom: 0; }
   .panel > section.verdict { order: 3; margin: 0 16px 16px; }
-  .panel > .weather-section { order: 4; }
   .map-wrap { order: 4; height: 70vh; min-height: 380px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
 
   .coords { grid-template-columns: 1fr 1fr; }
