@@ -4,6 +4,8 @@
 
 **Live app: https://tata-rekavo.vercel.app** (English / Español)
 
+Available countries: Paraguay, Bolivia, Uruguay, Peru and mainland Ecuador. Each country has its own calibration and validation; see the country sections below for limitations.
+
 *Tata Rekavo* means "fire tracker" in Guaraní.
 
 Satellites have counted fire hotspots over Paraguay since 2000, but the record is split in two: MODIS (Terra, Aqua) since 2000 and VIIRS (Suomi NPP, NOAA-20) since 2012. VIIRS has a finer pixel (375 m vs 1 km) and detects about **3.4 times more hotspots** over Paraguay. Stitching the raw records together makes burning appear to jump **×2.8 after 2012**, and that jump comes from the change of sensor, not from more fire. This repository turns both records into **one consistent monthly series in a single unit: VIIRS S-NPP-equivalent hotspots**, validated against real VIIRS observations, with a measured error for every value.
@@ -141,7 +143,7 @@ Never commit the MAP_KEY. Pass it through the environment only.
 
 ## Bolivia (pilot)
 
-The pipeline is country-configurable (`countries.json`); Bolivia is the first country after Paraguay, built into `data/app/BOL/` (Paraguay stays in `data/app/` until the app reads both). 0.25° grid (54 × 50, 1,577 cells with hotspots), 9 departments, 5 RESOLVE biomes as factor regions instead of a river split, FIRMS archives 2000–2025 (8.6 million hotspots scanned) plus the 2026 Area API data. No burn history and no per-hotspot export for Bolivia.
+The pipeline is country-configurable (`countries.json`); Bolivia is the first country after Paraguay, built into `data/app/BOL/` (Paraguay stays in `data/app/` to preserve existing links). 0.25° grid (54 × 50, 1,577 cells with hotspots), 9 departments, 5 RESOLVE biomes as factor regions instead of a river split, FIRMS archives 2000–2025 (8.6 million hotspots scanned) plus the 2026 Area API data. No burn history and no per-hotspot export for Bolivia.
 
 ```bash
 python firms_pipeline.py download --country BOL --data data/raw/BOL
@@ -182,25 +184,25 @@ Same pipeline and commands as Bolivia (`--country URY|PER|ECU --data data/raw/<I
 
 ### Ecuador
 
-0.1° grid over the mainland (66 × 60, 1,595 cells with hotspots; Galápagos is outside the grid and its province is left out of the ranking, so 23 provinces), 4 RESOLVE biomes as factor regions, FIRMS archives 2000–2025 (525,003 hotspots scanned, Galápagos included) plus the 2026 Area API data. Of the six biomes in the bounding box, flooded grasslands (22 cells) and coastal desert (1 cell) are too small to be a preset of their own (rule used for all countries: at least 500 vegetation hotspots and a region of at least 25 grid cells); their hotspots use the country factor.
+0.1° grid over the mainland (66 × 60, 1,595 cells with hotspots; Galápagos is outside the grid and its province is left out of the ranking, so 23 provinces), 4 RESOLVE biomes as factor regions, FIRMS archives 2000–2025 (525,003 hotspots scanned) plus the 2026 Area API data. Only vegetation hotspots inside the published mainland grid enter calibration, outage detection, validation and the reconstructed record: Galápagos is excluded consistently, including from the country fallback factors. Of the six biomes in the bounding box, flooded grasslands (22 cells) and coastal desert (1 cell) are too small to be a preset of their own (rule used for all countries: at least 500 vegetation hotspots and a region of at least 25 grid cells); their hotspots use the country factor.
 
 | Level | Median error | 90th pct error | Bias |
 |---|---|---|---|
-| Ecuador × month | 45.3 % | 269.9 % | -0.1 % |
-| Moist forests (Amazon, Chocó) × month | 35.8 % | 214.4 % | 7.7 % |
-| Dry forests (coast) × month | 63.7 % | 577.0 % | 12.5 % |
-| Highlands (Andes, páramo) × month | 79.9 % | 100 % | -25.9 % |
-| Mangroves × month | 100 % | 407.5 % | 33.1 % |
-| 1° block × month | 38.2 % | 100 % | -0.1 % |
-| 0.1° cell × month | 60.5 % | 122.6 % | -0.1 % |
+| Ecuador × month | 23.7 % | 74.3 % | 0.8 % |
+| Moist forests (Amazon, Chocó) × month | 26.6 % | 73.2 % | 0.0 % |
+| Dry forests (coast) × month | 38.8 % | 238.1 % | 4.8 % |
+| Highlands (Andes, páramo) × month | 73.6 % | 100 % | -35.3 % |
+| Mangroves × month | 64.4 % | 149.7 % | 16.1 % |
+| 1° block × month | 35.0 % | 85.5 % | 0.8 % |
+| 0.1° cell × month | 58.8 % | 118.7 % | 0.8 % |
 
-The verdict class matches the one VIIRS would give in 70.7 % of months (country), 64.5 % for 1° blocks. FRP (`frp.json`, flagged experimental because the country error is above 25 %): Ecuador 80.2 %. Mean 2013–2025 vs 2003–2011: naive record ×4.34, harmonized ×0.80.
+The verdict class matches the one VIIRS would give in 72.5 % of months (country), 64.1 % for 1° blocks. FRP (`frp.json`, flagged experimental because the country error is above 25 %): Ecuador 28.7 %. Mean 2013–2025 vs 2003–2011: naive record ×4.34, harmonized ×0.86.
 
 **Ecuador limitations.**
 
-- **The country median error (45.3 %) is far above the 15 % gate.** VIIRS 375 m sees about five times the hotspots of MODIS (monthly medians of 57–4,500 VIIRS S-NPP against 20–860 MODIS hotspots), small agricultural and pasture fires under frequent cloud, so the monthly Aqua-to-VIIRS ratio is noisy (Spearman 0.56 between translated and observed anomalies). The values before 2012 are rough: use the error band, and treat the verdict class as indicative only. The app shows the band for every month before 2012; from 2012 on the value is observed VIIRS.
+- **The country median error (23.7 %) is above the 15 % gate.** The monthly Aqua-to-VIIRS ratio remains noisy (Spearman 0.645 between translated and observed anomalies). The values before 2012 are rough: use the error band, and treat the verdict class as indicative only. The app shows the band for every month before 2012; from 2012 on the value is observed VIIRS, with detected sensor outages filled as described in the method.
 - **Every biome falls back to the country factor** in at least 7 calendar months, and highlands and mangroves in all 12 (grid.json `factor_fallback`): the regions differ from the country in their cells, not in their factors.
-- **Back-extrapolation is unstable.** Calibrating on 2019–2025 and predicting 2012–2018 is off by −21 % to +60 % depending on the year.
+- **Back-extrapolation is unstable.** Calibrating on 2019–2025 and predicting 2012–2018 is off by −6.2 % to +43.9 % depending on the year.
 - **Galápagos is not covered** (hotspots of the islands are not counted; no province entry).
 
 ### Peru

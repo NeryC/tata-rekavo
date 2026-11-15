@@ -2,233 +2,239 @@
  "method": "Aqua-based factor per region x calendar month, clean overlap days",
  "leave_one_year_out": {
   "country": {
-   "mdape_pct": 45.3,
-   "p90_ape_pct": 269.9,
-   "bias_pct": -0.1,
+   "mdape_pct": 23.7,
+   "p90_ape_pct": 74.3,
+   "bias_pct": 0.8,
    "n": 167,
    "min_obs": 1
   },
   "tropical-subtropical-moist-broadleaf-forests": {
-   "mdape_pct": 35.8,
-   "p90_ape_pct": 214.4,
-   "bias_pct": 7.7,
+   "mdape_pct": 26.6,
+   "p90_ape_pct": 73.2,
+   "bias_pct": -0.0,
    "n": 167,
    "min_obs": 1
   },
   "tropical-subtropical-dry-broadleaf-forests": {
-   "mdape_pct": 63.7,
-   "p90_ape_pct": 577.0,
-   "bias_pct": 12.5,
+   "mdape_pct": 38.8,
+   "p90_ape_pct": 238.1,
+   "bias_pct": 4.8,
    "n": 163,
    "min_obs": 1
   },
   "montane-grasslands-shrublands": {
-   "mdape_pct": 79.9,
+   "mdape_pct": 73.6,
    "p90_ape_pct": 100.0,
-   "bias_pct": -25.9,
+   "bias_pct": -35.3,
    "n": 163,
    "min_obs": 1
   },
   "mangroves": {
-   "mdape_pct": 100.0,
-   "p90_ape_pct": 407.5,
-   "bias_pct": 33.1,
+   "mdape_pct": 64.4,
+   "p90_ape_pct": 149.7,
+   "bias_pct": 16.1,
    "n": 152,
    "min_obs": 1
   },
   "block_1deg": {
-   "mdape_pct": 38.2,
-   "p90_ape_pct": 100.0,
-   "bias_pct": -0.1,
-   "n": 736,
+   "mdape_pct": 35.0,
+   "p90_ape_pct": 85.5,
+   "bias_pct": 0.8,
+   "n": 718,
    "min_obs": 50
   },
   "cell_0.5deg": {
-   "mdape_pct": 39.7,
+   "mdape_pct": 37.8,
    "p90_ape_pct": 100.0,
-   "bias_pct": -0.1,
-   "n": 1322,
+   "bias_pct": 0.8,
+   "n": 1292,
    "min_obs": 30
   },
   "cell_0.25deg": {
-   "mdape_pct": 47.8,
+   "mdape_pct": 46.3,
    "p90_ape_pct": 100.0,
-   "bias_pct": -0.1,
-   "n": 2258,
+   "bias_pct": 0.8,
+   "n": 2222,
    "min_obs": 20
   },
   "cell_0.1deg": {
-   "mdape_pct": 60.5,
-   "p90_ape_pct": 122.6,
-   "bias_pct": -0.1,
-   "n": 4684,
+   "mdape_pct": 58.8,
+   "p90_ape_pct": 118.7,
+   "bias_pct": 0.8,
+   "n": 4620,
    "min_obs": 10
   }
  },
  "backward_train_2019_2025_bias_pct": {
-  "2012": 24.2,
-  "2013": 36.9,
-  "2014": 10.3,
-  "2015": -20.7,
-  "2016": 31.3,
-  "2017": 60.3,
-  "2018": 1.8
+  "2012": 16.5,
+  "2013": 24.2,
+  "2014": -0.4,
+  "2015": -6.2,
+  "2016": 18.6,
+  "2017": 43.9,
+  "2018": 19.6
  },
  "anomaly_class_agreement": {
   "country": {
-   "spearman": 0.564,
-   "same_class_pct": 70.7,
+   "spearman": 0.645,
+   "same_class_pct": 72.5,
    "n": 167
   },
   "tropical-subtropical-moist-broadleaf-forests": {
-   "spearman": 0.62,
-   "same_class_pct": 63.5,
+   "spearman": 0.619,
+   "same_class_pct": 62.3,
    "n": 167
   },
   "tropical-subtropical-dry-broadleaf-forests": {
-   "spearman": 0.758,
-   "same_class_pct": 75.7,
+   "spearman": 0.761,
+   "same_class_pct": 77.5,
    "n": 111
   },
   "montane-grasslands-shrublands": {
-   "spearman": 0.785,
-   "same_class_pct": 56.5,
+   "spearman": 0.787,
+   "same_class_pct": 58.0,
    "n": 69
   },
   "mangroves": {
-   "spearman": 0.723,
+   "spearman": 0.728,
    "same_class_pct": 62.5,
    "n": 56
   },
   "block_1deg": {
-   "spearman": 0.77,
-   "same_class_pct": 64.5,
-   "n": 901
+   "spearman": 0.784,
+   "same_class_pct": 64.1,
+   "n": 894
   }
  },
  "error_model": {
   "formula": "relative_error(n) = min(1, c * n^(-p)) where n = harmonized hotspots in the zone-month; for months before viirs_start add the systematic term in quadrature: sqrt(rel^2 + sys[year]^2); months from viirs_start are observed (no translation error)",
-  "c": 1.1857,
-  "p": 0.1979,
+  "c": 1.3306,
+  "p": 0.2675,
   "sys_by_year": {
-   "2002": 0.06,
-   "2003": 0.157,
-   "2004": 0.16,
-   "2005": 0.118,
-   "2006": 0.163,
-   "2007": 0.109,
-   "2008": 0.014,
-   "2009": 0.131,
-   "2010": 0.122,
-   "2011": 0.076,
-   "2012": 0.316
+   "2002": 0.047,
+   "2003": 0.147,
+   "2004": 0.134,
+   "2005": 0.154,
+   "2006": 0.14,
+   "2007": 0.107,
+   "2008": 0.071,
+   "2009": 0.125,
+   "2010": 0.089,
+   "2011": 0.069,
+   "2012": 0.024
   },
   "meaning": "median absolute relative error (about half of zone-months fall inside the band)",
   "fit_bins": [
    [
-    6.2,
-    0.7029,
-    3485,
-    0.8275
+    4.9,
+    1.0,
+    225,
+    0.8718
+   ],
+   [
+    6.1,
+    0.8054,
+    4243,
+    0.8194
    ],
    [
     8.1,
-    0.7466,
-    4636,
-    0.7833
+    0.7557,
+    6666,
+    0.7597
    ],
    [
-    12.2,
-    0.8123,
-    3988,
-    0.7222
+    12.1,
+    0.6326,
+    2122,
+    0.6824
    ],
    [
-    16.4,
-    0.6915,
-    3092,
-    0.6816
+    16.3,
+    0.6669,
+    3290,
+    0.6304
    ],
    [
-    23.1,
-    0.7533,
-    3093,
-    0.6367
+    23.4,
+    0.593,
+    2224,
+    0.5725
    ],
    [
-    31.7,
-    0.6195,
-    1659,
-    0.5983
+    31.4,
+    0.5629,
+    1609,
+    0.529
    ],
    [
-    42.6,
-    0.5851,
-    1697,
-    0.5642
+    43.5,
+    0.4835,
+    1321,
+    0.485
    ],
    [
-    60.4,
-    0.5383,
-    1112,
-    0.5266
+    60.3,
+    0.4481,
+    925,
+    0.4443
    ],
    [
-    83.6,
-    0.4285,
-    840,
-    0.4937
+    82.2,
+    0.3696,
+    750,
+    0.409
    ],
    [
-    116.5,
-    0.4132,
-    557,
-    0.4624
+    116.8,
+    0.3622,
+    496,
+    0.3723
    ],
    [
-    163.5,
-    0.3508,
-    379,
-    0.4324
+    164.1,
+    0.2959,
+    333,
+    0.34
    ],
    [
-    229.2,
-    0.3434,
-    299,
-    0.4044
+    227.5,
+    0.3019,
+    261,
+    0.3115
    ],
    [
-    313.5,
-    0.3348,
-    174,
-    0.3801
+    312.1,
+    0.2746,
+    149,
+    0.2863
    ],
    [
-    449.8,
-    0.2725,
-    136,
-    0.3539
+    444.5,
+    0.2398,
+    120,
+    0.2604
    ],
    [
-    608.2,
-    0.3166,
-    95,
-    0.3334
+    598.8,
+    0.2835,
+    81,
+    0.2405
    ],
    [
-    836.9,
-    0.2935,
-    59,
-    0.313
+    836.2,
+    0.2695,
+    58,
+    0.2199
    ],
    [
-    1120.7,
-    0.2479,
-    55,
-    0.2954
+    1127.1,
+    0.2329,
+    49,
+    0.203
    ]
   ]
  },
  "snpp_outage_days": 43,
- "aqua_outage_days": 125
+ "aqua_outage_days": 62
 }
