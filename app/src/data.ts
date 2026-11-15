@@ -1,6 +1,7 @@
 import * as H from "@core";
 import type { CurrentMeta, DepartmentDef, Grid, GridMeta } from "@core";
 import type { I18n } from "./i18n";
+import type { SeasonFile } from "./season";
 
 export interface Hotspot {
   lon: number; lat: number; date: string; m: number; frp: number; cell: number;
@@ -59,6 +60,16 @@ export function loadDepartments(): Promise<DepartmentsFile | null> {
     })
     .catch(() => null);
   return departmentsPromise;
+}
+
+let seasonPromise: Promise<SeasonFile | null> | null = null;
+/** season.json (daily cumulative climatology), fetched once. Resolves to null when it is missing or malformed: the season chart is hidden. */
+export function loadSeason(): Promise<SeasonFile | null> {
+  seasonPromise ??= fetch(url("season.json"))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j): SeasonFile | null => (j && typeof j.areas === "object" && j.areas !== null && !Array.isArray(j.areas) ? (j as SeasonFile) : null))
+    .catch(() => null);
+  return seasonPromise;
 }
 
 export async function loadData(): Promise<AppData> {

@@ -3,6 +3,7 @@ import * as H from "@core";
 import MapView from "./MapView";
 import Calendar, { type CalMode } from "./Calendar";
 import YearChart from "./YearChart";
+import SeasonChart from "./SeasonChart";
 import ValidationPanel from "./ValidationPanel";
 import DepartmentRanking from "./DepartmentRanking";
 import { rangeAnalytics } from "./analytics";
@@ -10,10 +11,11 @@ import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadData, loadDepartments, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
+  HOTSPOT_HEADER, loadData, loadDepartments, loadSeason, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
 } from "./data";
 import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
 import { indexToMonth, planRestore } from "./shareRestore";
+import type { SeasonFile } from "./season";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang } from "./i18n";
 
 type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom" | "department";
@@ -34,6 +36,7 @@ export default function App() {
   const [zoneKind, setZoneKind] = useState<ZoneKind>("paraguay");
   const [departments, setDepartments] = useState<DepartmentsFile | null>(null); // null until loaded, or when it failed
   const [departmentId, setDepartmentId] = useState<string | null>(null);
+  const [season, setSeason] = useState<SeasonFile | null>(null); // null until loaded, or when it failed: the chart stays hidden
   const [polygon, setPolygon] = useState<number[][] | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
   const [coordsOpen, setCoordsOpen] = useState(false);
@@ -57,6 +60,7 @@ export default function App() {
   useEffect(() => {
     const depsLoad = loadDepartments(); // lazy and optional: starts with the grid, never blocks it
     void depsLoad.then(setDepartments);
+    void loadSeason().then(setSeason);
     loadData().then(async (d) => {
       // a shared department link has to wait for departments.json, or it would restore as Paraguay
       const link = decodeState(window.location.search);
@@ -456,6 +460,14 @@ export default function App() {
               </div>
               <Calendar grid={grid} series={series.harmonized} coverage={coverage} selected={month} onSelect={setMonth} mode={calMode} range={range} />
             </section>
+
+            {season && data.current?.to && (
+              <section>
+                <h2>{t.seasonTitle(zoneLabel)}</h2>
+                <SeasonChart season={season} zoneKind={zoneKind} departmentId={departmentId} hotspots={data.hotspots} zone={zoneSet}
+                  to={data.current.to} daysWithoutData={data.current.days_without_data} />
+              </section>
+            )}
 
             <section>
               <div className="h2row">

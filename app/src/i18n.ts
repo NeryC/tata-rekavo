@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { SeasonSummary } from "./season";
 
 export type Lang = "en" | "es";
 
@@ -60,6 +61,23 @@ const en = {
   rawCount: "raw sensor count", harmonizedCount: "harmonized",
   modisTA: "MODIS Terra + Aqua", viirsSnpp: "VIIRS S-NPP",
   chartAria: (a: number, b: number, naive: boolean) => `Hotspots per year ${a}–${b}, ${naive ? "raw sensors stitched together" : "harmonized"}`,
+  seasonTitle: (z: string) => `Season so far in ${z}`,
+  seasonAria: (year: number) => `Cumulative hotspots through ${year} against the usual range of 2003–2025`,
+  seasonLegendBand: "Usual range (10th–90th percentile)", seasonLegendMedian: "Median year", seasonToday: "today",
+  seasonYearCount: (year: number) => `${year} so far`, seasonMedianCount: "Median", seasonRangeCount: "Usual range",
+  seasonNoData: "no data", seasonNoDataDay: "no satellite data this day, the curve stays flat",
+  seasonStatus: (s: SeasonSummary) => {
+    if (s.kind === "early") return "Too early in the year to compare with a normal season.";
+    if (s.kind === "none") return "No hotspots yet, and the median for this date is also zero.";
+    const head = s.dir === "same" ? "In line with the usual level at this date"
+      : s.pct === null ? "Above the usual level at this date"
+      : `${s.pct} % ${s.dir === "above" ? "above" : "below"} the usual level at this date`;
+    if (!s.lead) return `${head}.`;
+    if (s.lead.dir === "onTime") return `${head}; the season is on schedule.`;
+    return `${head}; the season is running ${s.lead.days} days ${s.lead.dir === "ahead" ? "ahead" : "behind"}.`;
+  },
+  seasonNoClim: "No usual curve for this area: it is custom, or has no season history yet. Only this year's curve is shown.",
+  seasonCaption: "Both curves are cumulative hotspots from 1 January, in VIIRS S-NPP-equivalent units. Usual range: 2003–2025.",
   noteNaive: "Stitching the raw sensors together makes fire look ~3× higher after 2012 — but that jump is the switch to the more sensitive VIIRS sensor, not more fire.",
   noteHarmonized: "One unit for 24 years: MODIS counts before 2012 are translated to what VIIRS would have detected, with a factor per region and calendar month.",
   newTitle: "Fire in new places",
@@ -203,6 +221,23 @@ const es: Dict = {
   rawCount: "conteo crudo del sensor", harmonizedCount: "armonizado",
   modisTA: "MODIS Terra + Aqua", viirsSnpp: "VIIRS S-NPP",
   chartAria: (a, b, naive) => `Focos por año ${a}–${b}, ${naive ? "sensores crudos pegados" : "armonizado"}`,
+  seasonTitle: (z) => `Temporada hasta hoy en ${z}`,
+  seasonAria: (year) => `Focos acumulados en ${year} frente al rango habitual de 2003–2025`,
+  seasonLegendBand: "Rango habitual (percentil 10–90)", seasonLegendMedian: "Año mediano", seasonToday: "hoy",
+  seasonYearCount: (year) => `${year} hasta hoy`, seasonMedianCount: "Mediana", seasonRangeCount: "Rango habitual",
+  seasonNoData: "sin datos", seasonNoDataDay: "sin datos de satélite este día, la curva queda plana",
+  seasonStatus: (s) => {
+    if (s.kind === "early") return "Es muy temprano en el año para comparar con una temporada normal.";
+    if (s.kind === "none") return "Todavía no hay focos, y la mediana para esta fecha también es cero.";
+    const head = s.dir === "same" ? "En línea con lo normal a esta fecha"
+      : s.pct === null ? "Por encima de lo normal a esta fecha"
+      : `${s.pct} % ${s.dir === "above" ? "por encima" : "por debajo"} de lo normal a esta fecha`;
+    if (!s.lead) return `${head}.`;
+    if (s.lead.dir === "onTime") return `${head}; la temporada va en fecha.`;
+    return `${head}; la temporada viene ${s.lead.days} días ${s.lead.dir === "ahead" ? "adelantada" : "atrasada"}.`;
+  },
+  seasonNoClim: "No hay curva habitual para esta área: es personalizada o todavía no tiene historia de temporada. Solo se muestra la curva de este año.",
+  seasonCaption: "Ambas curvas son focos acumulados desde el 1 de enero, en unidades equivalentes a VIIRS S-NPP. Rango habitual: 2003–2025.",
   noteNaive: "Pegar los sensores crudos hace que el fuego parezca ~3 veces mayor después de 2012, pero ese salto es el cambio al sensor VIIRS, más sensible, no más fuego.",
   noteHarmonized: "Una sola unidad para 24 años: los conteos de MODIS antes de 2012 se traducen a lo que habría detectado VIIRS, con un factor por región y mes.",
   newTitle: "Fuego en lugares nuevos",

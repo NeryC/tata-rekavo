@@ -17,6 +17,8 @@ export interface CurrentMeta {
   generated: string; source?: string;
   month_coverage: Record<string, number>;
   month_products: Record<string, Record<string, number>>;
+  /** "YYYY-MM-DD" days in [from, to] with no FIRMS data yet. */
+  days_without_data?: string[];
 }
 export interface Cell { m: number[]; h: number[]; modis: number[]; viirs: number[] }
 export interface Grid { meta: GridMeta; cells: Map<number, Cell>; nMonths: number }

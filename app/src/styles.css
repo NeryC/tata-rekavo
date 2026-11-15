@@ -164,8 +164,8 @@ button.cal-cell:hover { outline: 2px solid var(--ink-2); }
 .cal-legend i, .chart-legend i, .legend-ramp i { display: inline-block; width: 13px; height: 13px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; box-shadow: inset 0 0 0 1px var(--ring); }
 
 /* ---------- yearly chart ---------- */
-.yearchart { position: relative; }
-.yearchart svg { width: 100%; height: auto; display: block; }
+.yearchart, .seasonchart { position: relative; }
+.yearchart svg, .seasonchart svg { width: 100%; height: auto; display: block; }
 .chart-legend { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 14px; color: var(--ink-2); margin-bottom: 6px; }
 i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0 2px, transparent 2px 5px); }
 .gridline { stroke: var(--rule); stroke-width: 1; }
@@ -173,6 +173,10 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .marker { stroke: var(--ink-2); stroke-dasharray: 3 3; stroke-width: 1; }
 .errbar { stroke: var(--ink); stroke-width: 1.2; }
 .axis { font-size: 12.5px; fill: var(--muted); }
+.seasonchart svg { touch-action: pan-y; }
+.hoverline { stroke: var(--ink-2); stroke-width: 1; }
+.nodata-tick { stroke: var(--warn); stroke-width: 1.5; }
+.season-status { margin-top: 8px; font-size: 16px; font-weight: 600; color: var(--ink); }
 .bar { transition: y 0.5s ease, height 0.5s ease, fill 0.3s; }
 
 /* ---------- period: analytics + downloads ---------- */
