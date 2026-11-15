@@ -180,6 +180,29 @@ The country median error (7.4 %) is under the 15 % gate. The verdict class match
 
 Same pipeline and commands as Bolivia (`--country URY|PER|ECU --data data/raw/<ISO3> --out data/app/<ISO3>`), each with its own grid, department ranking (geoBoundaries ADM1) and factor regions from `countries.json`. No burn history and no per-hotspot export. Cross-border areas (Pantanal, Chaco, Amazon) are cut at the national border: a country's area covers only its own side.
 
+### Ecuador
+
+0.1° grid over the mainland (66 × 60, 1,595 cells with hotspots; Galápagos is outside the grid and its province is left out of the ranking, so 23 provinces), 4 RESOLVE biomes as factor regions, FIRMS archives 2000–2025 (525,003 hotspots scanned, Galápagos included) plus the 2026 Area API data. Of the six biomes in the bounding box, flooded grasslands (22 cells) and coastal desert (1 cell) are too small to be a preset of their own (rule used for all countries: at least 500 vegetation hotspots and a region of at least 25 grid cells); their hotspots use the country factor.
+
+| Level | Median error | 90th pct error | Bias |
+|---|---|---|---|
+| Ecuador × month | 45.3 % | 269.9 % | -0.1 % |
+| Moist forests (Amazon, Chocó) × month | 35.8 % | 214.4 % | 7.7 % |
+| Dry forests (coast) × month | 63.7 % | 577.0 % | 12.5 % |
+| Highlands (Andes, páramo) × month | 79.9 % | 100 % | -25.9 % |
+| Mangroves × month | 100 % | 407.5 % | 33.1 % |
+| 1° block × month | 38.2 % | 100 % | -0.1 % |
+| 0.1° cell × month | 60.5 % | 122.6 % | -0.1 % |
+
+The verdict class matches the one VIIRS would give in 70.7 % of months (country), 64.5 % for 1° blocks. FRP (`frp.json`, flagged experimental because the country error is above 25 %): Ecuador 80.2 %. Mean 2013–2025 vs 2003–2011: naive record ×4.34, harmonized ×0.80.
+
+**Ecuador limitations.**
+
+- **The country median error (45.3 %) is far above the 15 % gate.** VIIRS 375 m sees about five times the hotspots of MODIS (monthly medians of 57–4,500 VIIRS S-NPP against 20–860 MODIS hotspots), small agricultural and pasture fires under frequent cloud, so the monthly Aqua-to-VIIRS ratio is noisy (Spearman 0.56 between translated and observed anomalies). The values before 2012 are rough: use the error band, and treat the verdict class as indicative only. The app shows the band for every month before 2012; from 2012 on the value is observed VIIRS.
+- **Every biome falls back to the country factor** in at least 7 calendar months, and highlands and mangroves in all 12 (grid.json `factor_fallback`): the regions differ from the country in their cells, not in their factors.
+- **Back-extrapolation is unstable.** Calibrating on 2019–2025 and predicting 2012–2018 is off by −21 % to +60 % depending on the year.
+- **Galápagos is not covered** (hotspots of the islands are not counted; no province entry).
+
 ### Peru
 
 0.25° grid (74 × 52, 1,715 cells with hotspots), 24 departments, 4 RESOLVE biomes as factor regions, FIRMS archives 2000–2025 (2.03 million hotspots scanned) plus the 2026 Area API data. Savannas and flooded grasslands (under 500 hotspots) and mangroves (2,834 hotspots, a strip of Tumbes: 21 cells) are not factor regions; their hotspots use the country factor. Lima is the department of Lima: the Lima region, the Metropolitan Municipality of Lima (Lima Province) and El Callao (146 km², smaller than one grid cell) are merged into it, so there are 24 units, not 25.
@@ -249,6 +272,7 @@ The verdict class matches the one VIIRS would give in 71.3 % of months (country)
 - **RESOLVE Ecoregions 2017** (846 ecoregions in 14 biomes): https://storage.googleapis.com/teow2016/Ecoregions2017.zip (via https://ecoregions.appspot.com/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the factor regions of the countries outside Paraguay: clipped to Latin America, dissolved into biomes and rasterized at 0.05° (`data/ext/biomes_latam.npz`, see `data/ext/README.md`). Paraguay keeps its Chaco / Oriental split.
   Citation: Dinerstein, E., Olson, D., Joshi, A., Vynne, C., Burgess, N. D., Wikramanayake, E., et al. (2017). An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm. *BioScience* 67(6): 534-545. https://doi.org/10.1093/biosci/bix014
 - **geoBoundaries** gbOpen, Bolivia ADM1 (departments): https://www.geoboundaries.org/ (API: https://www.geoboundaries.org/api/current/gbOpen/BOL/ADM1/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the Bolivia department ranking and area selection; boundaries are simplified. Same citation as above.
+- **geoBoundaries** gbOpen, Ecuador ADM1 (provinces): https://www.geoboundaries.org/api/current/gbOpen/ECU/ADM1/. Licence: CC BY 4.0. Retrieved 2026-11-15. Same use and citation as Bolivia.
 - **geoBoundaries** gbOpen, Peru ADM1 (departments): https://www.geoboundaries.org/api/current/gbOpen/PER/ADM1/. Licence: CC BY 4.0. Retrieved 2026-11-15. Same use and citation as Bolivia.
 - **geoBoundaries** gbOpen, Uruguay ADM1 (departments): https://www.geoboundaries.org/api/current/gbOpen/URY/ADM1/. Licence: CC BY 4.0. Retrieved 2026-11-15. Same use and citation as Bolivia.
 - **Indigenous territories:** not included yet. Next step: add them as a second context layer, with fire statistics only, if a source with terms that allow it is found.
