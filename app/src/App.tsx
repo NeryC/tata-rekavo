@@ -123,7 +123,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     void depsLoad.then(setDepartments);
     void loadSeason(path).then(setSeason);
     void loadContext(path).then(setContext);
-    loadData(path).then(async (d) => {
+    loadData(path, country.iso3).then(async (d) => {
       // a shared department link has to wait for departments.json, or it would restore as the whole country
       const link = decodeState(window.location.search, (iso3) => (iso3 === country.iso3 ? country.bbox : undefined));
       const deps = link.zone === "department" ? await depsLoad : null;
