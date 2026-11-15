@@ -6,8 +6,8 @@
 
 | Etapa | Estado | Evidencia o siguiente paso |
 |---|---|---|
-| 1. Claridad de datos | Terminada; en PR | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
-| 2. Fecha y procedencia | Terminada; en PR (rama `feat/procedencia-focos`, issue #30) | 103 pruebas y compilación correctas; navegador en español/inglés a 320, 375 y 1440 px con Paraguay (GMT-3) y Bolivia (GMT-4). Ventana emergente del foco comprobada: abre con clic o toque y cierra al tocar fuera. |
+| 1. Claridad de datos | Terminada (PR #31) | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
+| 2. Fecha y procedencia | Terminada (PR #33) | 103 pruebas y compilación correctas; navegador en español/inglés a 320, 375 y 1440 px con Paraguay (GMT-3) y Bolivia (GMT-4). Ventana emergente del foco comprobada: abre con clic o toque y cierra al tocar fuera. |
 | 3. Área quemada | Pendiente | Confirmar acceso, licencia y piloto antes de integrar. |
 | 4. Caso Cerro Corá | Pendiente | Confirmar fuentes, permisos y datos disponibles. |
 | 5. Compartir para verificación | Pendiente | Depende de metadatos fiables de la etapa 2. |
