@@ -68,12 +68,6 @@ def test_cell_of_non_square_grid():
     assert g.index(1, 3) == 7
 
 
-def test_region_of_biome_not_implemented_yet(tmp_path):
-    cfg = _config(tmp_path, regions={"kind": "biome", "names": ["a", "b"]})
-    with pytest.raises(NotImplementedError):
-        region_of(-22, -60, cfg)
-
-
 def test_region_of_unknown_kind_rejected(tmp_path):
     cfg = _config(tmp_path, regions={"kind": "nope", "names": ["a"]})
     with pytest.raises(ValueError, match="nope"):

@@ -55,3 +55,41 @@ every area that contains it. `zones` (country, regions, departments) total the u
 Several designations overlap (Ramsar sites, UNESCO-MAB biosphere reserves over national parks), so the areas must not be summed.
 An area lists a department / region when at least one 0.1-degree grid-cell centre of it lies inside the area or at least one hotspot
 inside the area falls in it.
+
+## biomes_latam.npz
+
+Biomes of Latin America on a 0.05-degree raster, used as the factor regions of every country whose `regions.kind` is
+`"biome"` in `countries.json` (Paraguay keeps its Chaco / Oriental river split).
+
+- Source: RESOLVE Ecoregions 2017, `Ecoregions2017.zip` (shapefile, 846 ecoregions in 14 biomes).
+- URL: https://storage.googleapis.com/teow2016/Ecoregions2017.zip (linked from https://ecoregions.appspot.com/);
+  149,248,653 bytes, MD5 5d568e0d7b25602a12bba18baf0b03ba (as published by the bucket, Last-Modified 2019-05-07).
+- Retrieved: 2026-11-15
+- License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+- Citation: Dinerstein, E., Olson, D., Joshi, A., Vynne, C., Burgess, N. D., Wikramanayake, E., et al. (2017).
+  An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm. BioScience 67(6): 534-545.
+  https://doi.org/10.1093/biosci/bix014
+
+Preparation (the zip unzipped in `data/raw/ext/resolve/`, gitignored), mapshaper 0.6.102: clip to the Latin America box
+(lon -118..-34, lat -56..33) and dissolve the ecoregions into biomes:
+
+```
+cd data/raw/ext/resolve
+npx --yes mapshaper@0.6.102 -i Ecoregions2017.shp -clip bbox=-118,-56,-34,33 -dissolve BIOME_NUM copy-fields=BIOME_NAME \
+  -o precision=0.0001 format=geojson derived/biomes_latam.geojson
+cd ../../../..
+python firms_pipeline.py build-biomes --geojson data/raw/ext/resolve/derived/biomes_latam.geojson --out data/ext/biomes_latam.npz
+```
+
+`build-biomes` gives each 0.05-degree cell (origin lat -56, lon -118; 1780 rows x 1680 columns) the biome whose polygon
+contains the cell centre (matplotlib point-in-polygon, holes excluded; 0 = no ecoregion, i.e. sea and large lakes).
+The file holds `codes` (uint8, row-major, row = floor((lat+56)/0.05), col = floor((lon+118)/0.05)), the grid
+(`deg`, `lat0`, `lon0`, `rows`, `cols`) and the table `biome_code` -> `biome_name` (RESOLVE `BIOME_NUM` / `BIOME_NAME`).
+Inside the box `BIOME_NUM` 11 holds only "Rock and Ice" (Patagonian ice fields, `BIOME_NAME` "N/A") and the South Georgia
+tundra, so it is named "Tundra; Rock and Ice".
+
+Use in the pipeline: a hotspot belongs to the biome of its raster cell; cells with code 0 (coast, lakes) take the nearest
+biome cell. Factor region ids are slugs of the biome names (e.g. `tropical-subtropical-moist-broadleaf-forests`). A
+biome-month in which S-NPP or the MODIS sensor of the ratio has fewer than 500 hotspots on clean overlap days uses the
+country factor of that calendar month (`regions.min_hotspots`); the months that fell back are listed in `grid.json`
+`meta.factor_fallback`.

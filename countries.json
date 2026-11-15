@@ -33,5 +33,24 @@
       },
       "note": "Simplified department boundaries (geoBoundaries; original source DGEEC Paraguay). Asuncion is merged into Central (17 departments). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
     }
+  },
+  "BOL": {
+    "name": "Bolivia",
+    "firms_name": "Bolivia",
+    "area": "bolivia",
+    "bbox": [-69.7, -22.95, -57.4, -9.6],
+    "deg": 0.25,
+    "lat0": -23.0,
+    "lon0": -69.75,
+    "rows": 54,
+    "cols": 50,
+    "regions": {
+      "kind": "biome",
+      "source": "data/ext/biomes_latam.npz",
+      "min_hotspots": 500
+    },
+    "export_hotspots": false,
+    "burn_history": false,
+    "mask": {"deg": 0.05, "rows": 270, "cols": 250}
   }
 }
