@@ -44,6 +44,10 @@ done < <(node -e '
 
 if [ "${#countries[@]}" -eq 0 ]; then echo "nothing uploaded"; exit 1; fi
 
+# every country's latest verdict in one small file, for the app's "South America now" row
+node summary.mjs "$data_dir" "$tmp/summary.json"
+put "$tmp/summary.json" "${prefix}summary.json" "application/json" "$immutable" gzip
+
 node -e '
   const [prefix, ...isos] = process.argv.slice(1);
   const countries = Object.fromEntries(isos.map((i) => [i, i + "/"]));
