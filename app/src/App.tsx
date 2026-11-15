@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as H from "@core";
-import MapView from "./MapView";
 import Calendar, { type CalMode } from "./Calendar";
 import YearChart from "./YearChart";
 import SeasonChart from "./SeasonChart";
@@ -21,6 +20,9 @@ import { indexToMonth, planRestore } from "./shareRestore";
 import type { ContextFile, Grid } from "@core";
 import type { SeasonFile } from "./season";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang, type Metric } from "./i18n";
+
+// the map (MapLibre, most of the JavaScript) is a separate chunk: the panel and its verdict render while it downloads
+const MapView = lazy(() => import("./MapView"));
 
 /** the country's own area id ("paraguay", "bolivia"), one of its region presets ("chaco", a biome id), "custom" or "department" */
 type ZoneKind = string;
@@ -115,6 +117,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const [viewNonce, setViewNonce] = useState(0);
   const [mapMoved, setMapMoved] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [hotspotsReady, setHotspotsReady] = useState(false); // individual hotspots and burn history loaded (second stage)
   const [manualUrl, setManualUrl] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -123,7 +126,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     void depsLoad.then(setDepartments);
     void loadSeason(path).then(setSeason);
     void loadContext(path).then(setContext);
-    loadData(path, country.iso3).then(async (d) => {
+    let alive = true;
+    loadData(path, country.iso3).then(async ({ data: d, extras }) => {
       // a shared department link has to wait for departments.json, or it would restore as the whole country
       const link = decodeState(window.location.search, (iso3) => (iso3 === country.iso3 ? country.bbox : undefined));
       const deps = link.zone === "department" ? await depsLoad : null;
@@ -143,9 +147,17 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
       } else setPolygon(r.poly);
       setMonth(r.month);
       setRange(r.range);
-      setCalMode(r.cal); setNaive(r.naive); setNewOnly(r.newOnly && d.hasBurnHistory); setMetric(r.metric);
+      setCalMode(r.cal); setNaive(r.naive); setMetric(r.metric);
+      if (!alive) return;
       setData(d);
+      // second stage: hotspots and burn history arrive after the verdict is on screen
+      const x = await extras;
+      if (!alive) return;
+      setData((cur) => (cur && cur.grid === d.grid ? { ...cur, ...x } : cur));
+      setHotspotsReady(true);
+      if (r.newOnly && x.hasBurnHistory) setNewOnly(true);
     }).catch((e) => setError(String(e)));
+    return () => { alive = false; };
   }, [path, country]);
   useEffect(() => { document.documentElement.lang = lang; document.title = `Tata Rekavo · ${t.title}`; saveLang(lang); }, [lang, t]);
 
@@ -362,9 +374,11 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   // the daily workflow refreshes current.json but cannot rebuild context.json: figures of the last month can lag behind the data shown
   const lastHotspotDate = data.hotspots.reduce<string | null>((mx, h) => (mx === null || h.date > mx ? h.date : mx), null);
   const protStale = !!context && month === protThroughIdx && isContextStale(context, lastHotspotDate, data.current?.generated);
-  const protSummary = context && protZone && !v.noData && !protStale
+  // the last month's figures need the hotspots to tell whether they are stale: wait for the second stage
+  const protPending = month === protThroughIdx && !hotspotsReady;
+  const protSummary = context && protZone && !v.noData && !protStale && !protPending
     ? H.protectedSummary(context, protZone, month, active, cov, { classes: meta.classes, zoneValue: v.value, lowSignalMedian: active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : 10 }) : null;
-  const protNote = !context || v.noData ? null : zoneKind === "custom" ? "custom" : month > protThroughIdx ? "late" : protStale ? "stale" : null;
+  const protNote = !context || v.noData || protPending ? null : zoneKind === "custom" ? "custom" : month > protThroughIdx ? "late" : protStale ? "stale" : null;
   const protTop = protSummary ? protSummary.areas.filter((a) => a.value >= 0.5).slice(0, 3) : [];
   const protPct = protSummary?.share != null ? protSummary.share * 100 : null;
   // a share under 1 % must not round to "0 %" next to a non-zero count
@@ -625,7 +639,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                 <p className="note">{t.seasonCountsOnly}</p>
               </section>
             )}
-            {!frpOn && season && data.current?.to && (
+            {!frpOn && season && data.current?.to && hotspotsReady && (
               <section>
                 <h2>{t.seasonTitle(zoneLabel)}</h2>
                 <SeasonChart season={season} zoneKind={zoneKind} departmentId={departmentId} hotspots={data.hotspots} zone={zoneSet}
@@ -684,7 +698,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                   download(`tata-rekavo_monthly_${metricTag}${fileTag}.csv`, [lines[0], ...lines.slice(range[0] + 1, range[1] + 2)].join("\n") + "\n");
                 }}>{t.dlSeriesRange(ml(range[0]), ml(range[1]))}</button>
                 {hasArchive !== false && (<>
-                  <button disabled={!!busy || tooMany || !zoneCells.length} onClick={downloadHotspots}>
+                  <button disabled={!!busy || tooMany || !zoneCells.length || !hotspotsReady} onClick={downloadHotspots}>
                     {busy ?? t.dlHotspotsRange(ml(range[0]), ml(range[1]))}
                     {!busy && estimate !== null && !tooMany && <span className="dl-hint">{t.dlHotspotsEstimate(num(estimate))}</span>}
                   </button>
@@ -723,12 +737,14 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
             </footer>
           </aside>
 
+          <Suspense fallback={<div className="map-wrap" aria-busy="true" />}>
           <MapView grid={countGrid} metric={active} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
             countryBBox={country.bbox} showNew={data.hasBurnHistory}
             outline={outline} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setDepartmentId(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)}
             onUserMove={() => setMapMoved(true)} onViewReset={() => setMapMoved(false)} />
+          </Suspense>
         </main>
       </div>
     </I18nContext.Provider>

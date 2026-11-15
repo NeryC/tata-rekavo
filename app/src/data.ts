@@ -213,27 +213,41 @@ export function loadFrp(path = ""): Promise<unknown | null> {
     .catch(() => null));
 }
 
-/** Everything the first screen of a country needs. Only grid.json is required; the other files are optional. */
-export async function loadData(path = "", iso3?: string): Promise<AppData> {
-  const [gridJson, { currentJson, hotspotsUrl }, burnJson] = await Promise.all([
+/** The hotspots of the daily files and what the burn history adds to them: loaded after the first screen. */
+export interface HotspotExtras { hotspots: Hotspot[]; historyPeriod: string; hasBurnHistory: boolean }
+
+/**
+ * What the first screen of a country needs (grid.json, current.json and, for biome countries, regions.json), and a
+ * second stage with the individual hotspots and the burn history. The verdict can show as soon as `data` resolves;
+ * the map points, "fire in new places" and the season curve fill in when `extras` resolves (`data` has none until then).
+ * Only grid.json is required; the other files are optional.
+ */
+export async function loadData(path = "", iso3?: string): Promise<{ data: AppData; extras: Promise<HotspotExtras> }> {
+  const burnLoad = getJson("burn_history.json", path) as Promise<BurnHistory | null>; // starts now, awaited in stage 2
+  const [gridJson, { currentJson, hotspotsUrl }] = await Promise.all([
     fetch(url("grid.json", path)).then((r) => r.json()),
     currentSource(path, iso3),
-    getJson("burn_history.json", path) as Promise<BurnHistory | null>,
   ]);
   const grid = H.decodeGrid(gridJson, currentJson);
-  const hasBurnHistory = !!burnJson && typeof burnJson.last_year_minus_2000_b64 === "string";
-  const isFresh = burnJson && hasBurnHistory ? makeFreshTest(burnJson) : () => false;
   // biome countries: which grid cells make each region preset (Paraguay's river split needs no file)
   const regionCells = grid.meta.regions?.kind === "biome" ? validRegionCells(await getJson("regions.json", path)) : null;
+  const data: AppData = { grid, current: currentJson ? (currentJson as { meta: CurrentMeta }).meta : null, currentJson, hotspots: [],
+    historyPeriod: "", hasBurnHistory: false, regionCells };
+  return { data, extras: loadHotspots(grid, hotspotsUrl, burnLoad) };
+}
+
+async function loadHotspots(grid: Grid, hotspotsUrl: string, burnLoad: Promise<BurnHistory | null>): Promise<HotspotExtras> {
+  const [burnJson, txt] = await Promise.all([burnLoad, fetch(hotspotsUrl).then((r) => (r.ok ? r.text() : "")).catch(() => "")]);
+  const hasBurnHistory = !!burnJson && typeof burnJson.last_year_minus_2000_b64 === "string";
+  const isFresh = burnJson && hasBurnHistory ? makeFreshTest(burnJson) : () => false;
   let hotspots: Hotspot[] = [];
   try {
-    const txt = await fetch(hotspotsUrl).then((r) => (r.ok ? r.text() : ""));
     const lines = txt.trim().split("\n");
     const cols = lines[0].split(",");
     const col = (n: string) => cols.indexOf(n);
     const iLat = col("latitude"), iLon = col("longitude"), iDate = col("acq_date"), iFrp = col("frp");
     const keep = ["acq_time", "satellite", "instrument", "confidence", "frp", "daynight", "product"].map(col);
-    hotspots = lines.slice(1).map((line) => {
+    if (iLat >= 0 && iLon >= 0 && iDate >= 0) hotspots = lines.slice(1).map((line) => {
       const f = line.split(",");
       const lat = +f[iLat], lon = +f[iLon], date = f[iDate];
       const [y, mo] = date.split("-").map(Number);
@@ -243,7 +257,7 @@ export async function loadData(path = "", iso3?: string): Promise<AppData> {
       return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv };
     });
   } catch { /* hotspots are optional */ }
-  return { grid, current: currentJson ? (currentJson as { meta: CurrentMeta }).meta : null, currentJson, hotspots, historyPeriod: burnJson?.period ?? "", hasBurnHistory, regionCells };
+  return { hotspots, historyPeriod: burnJson?.period ?? "", hasBurnHistory };
 }
 
 function interp(x: number, xs: number[], ys: number[]) {
