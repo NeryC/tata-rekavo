@@ -17,6 +17,26 @@ Derived file: `data/app/departments.json`, built with `python firms_pipeline.py 
 (Asuncion merged into Central; coordinates rounded to 3 decimals; each 0.1-degree grid cell assigned to the
 department containing its centre, with centres just outside the simplified outline going to the nearest department).
 
+## bol_adm1.geojson
+
+Bolivia first-level administrative boundaries (9 departments).
+
+- Source: geoBoundaries gbOpen, BOL ADM1, `simplifiedGeometryGeoJSON` file (the link returned by the API), kept as downloaded
+  by `fetch_boundaries` (1,003,986 bytes; properties `shapeName`, `shapeISO`, `shapeID`, `shapeGroup`, `shapeType`).
+- API: https://www.geoboundaries.org/api/current/gbOpen/BOL/ADM1/
+- Retrieved: 2026-11-15
+- License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+- Attribution: Runfola, D. et al. (2020) geoBoundaries: A global database of political administrative boundaries.
+  PLoS ONE 15(4): e0231866. https://doi.org/10.1371/journal.pone.0231866
+
+Derived files, built with `python firms_pipeline.py build-regions --country BOL --out data/app/BOL`:
+
+- `data/app/BOL/departments.json`: display names with accents (`Potosí`) and ASCII slugs as ids (`potosi`, `santa-cruz`) from the
+  `departments` block of `countries.json`; coordinates rounded to 3 decimals; each 0.25-degree grid cell assigned to the department
+  containing its centre, centres just outside the simplified outline going to the nearest department (every cell is assigned).
+- `data/app/BOL/regions.json` (not from geoBoundaries: from `biomes_latam.npz`, below): the grid cells of each factor region (biome),
+  used by the app for the region presets. A cell belongs to the biome of most of its 25 0.05-degree raster cells.
+
 ## protected_areas.geojson (private, not committed) and `data/app/context.json`
 
 Protected areas of Paraguay from the WDPA / WD-OECM (November 2026 release, 137 polygons, all STATUS = Designated).

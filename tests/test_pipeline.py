@@ -334,6 +334,46 @@ def test_departments_real_data():
     assert len(seen) / len(grid_ids) >= 0.99
 
 
+BOL_DEPARTMENTS = {"beni": "Beni", "chuquisaca": "Chuquisaca", "cochabamba": "Cochabamba", "la-paz": "La Paz", "oruro": "Oruro",
+                   "pando": "Pando", "potosi": "Potosí", "santa-cruz": "Santa Cruz", "tarija": "Tarija"}
+
+
+def test_departments_real_data_bolivia():
+    gj = ROOT / "data" / "ext" / "bol_adm1.geojson"
+    grid_path = ROOT / "data" / "app" / "BOL" / "grid.json"
+    if not gj.exists() or not grid_path.exists():
+        pytest.skip("data/ext/bol_adm1.geojson or data/app/BOL/grid.json not present")
+    grid = json.loads(grid_path.read_text(encoding="utf-8"))
+    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, load_country("BOL"))
+    assert {d["id"]: d["name"] for d in deps} == BOL_DEPARTMENTS    # slugs without accents, display names with them
+    seen = set()
+    for d in deps:
+        assert d["cells"], d["id"]
+        assert not seen & set(d["cells"]), f"duplicate cell in {d['id']}"
+        seen |= set(d["cells"])
+        w, s, e, n = d["bbox"]
+        assert w < e and s < n
+        assert d["geometry"]["type"] == "MultiPolygon"
+    assert seen == {c[0] for c in grid["cells"]}   # every cell with data belongs to exactly one department
+
+
+def test_region_cells_bolivia_cover_the_grid_once():
+    grid_path = ROOT / "data" / "app" / "BOL" / "grid.json"
+    if not grid_path.exists() or not Path(firms_pipeline.BIOMES_PATH).exists():
+        pytest.skip("data/app/BOL/grid.json or data/ext/biomes_latam.npz not present")
+    bol = load_country("BOL")
+    grid = json.loads(grid_path.read_text(encoding="utf-8"))
+    cells = firms_pipeline.build_region_cells(grid["meta"]["grid"], bol)
+    assert list(cells) == bol.region_names              # every factor region has cells, in the config order
+    flat = [c for v in cells.values() for c in v]
+    assert len(flat) == len(set(flat))                  # no cell in two regions
+    assert {c[0] for c in grid["cells"]} <= set(flat)   # every cell with data has a region
+    g = grid["meta"]["grid"]
+    cell = lambda lat, lon: int((lat - g["lat0"]) // g["deg"]) * g["cols"] + int((lon - g["lon0"]) // g["deg"])
+    assert cell(-16.5, -68.1) in cells["montane-grasslands-shrublands"]           # La Paz, Altiplano
+    assert cell(-11.0, -66.0) in cells["tropical-subtropical-moist-broadleaf-forests"]   # Riberalta, Amazon
+
+
 # ----------------------------------------------------------------------------- season climatology
 def _synthetic_weights():
     import pandas as pd
