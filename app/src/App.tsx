@@ -8,6 +8,7 @@ import DepartmentRanking from "./DepartmentRanking";
 import ProtectedAreas from "./ProtectedAreas";
 import Glance, { type CaseLink } from "./Glance";
 import WeatherPanel from "./WeatherPanel";
+import { historyPeriodLabel } from "./historyPeriod";
 import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
 import { layerNote, shareLabel, topRows } from "./layerFigures";
@@ -719,6 +720,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                 <p className="stat">{nNew > 0
                   ? <><b>{num(nNew)}</b>{t.newStat("", num(zoneMonthHotspots.length), (Math.round(pctNew * 10) / 10).toLocaleString(lang === "es" ? "es-PY" : "en-US"))}</>
                   : t.newNone(num(zoneMonthHotspots.length))}</p>
+                <p className="note">{t.historyCoverage(historyPeriodLabel(data.historyPeriod, i18n.monthLongLabel))}</p>
                 <label className="check">
                   <input type="checkbox" checked={newOnly} onChange={(e) => setNewOnly(e.target.checked)} />
                   {t.newOnly}
