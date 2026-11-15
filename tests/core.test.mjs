@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { doyOf } from "../app/src/season.ts";
 import {
-  classify, currentCumulative, decodeGrid, departmentRanking, indexOf, monthOf, seasonStatus, validationSummary, verdict,
+  calendar, classify, currentCumulative, decodeFrp, decodeGrid, departmentRanking, indexOf, monthOf, seasonStatus, seriesToCSV,
+  validationSummary, verdict, zoneSeries,
 } from "../harmonized.js";
 
 const grid = JSON.parse(
@@ -299,4 +300,132 @@ test("app doyOf indexes the same day as currentCumulative, leap years included",
     assert.equal(c[doy - 1], 1, date);
     assert.equal(doy > 1 ? c[doy - 2] : 0, 0, date);
   }
+});
+
+// ---------------------------------------------------------------- harmonized FRP (frp.json)
+const frpJson = JSON.parse(readFileSync(new URL("../data/app/frp.json", import.meta.url), "utf8"));
+const smallFrp = () => ({
+  meta: { ...frpJson.meta, months: { first: "2002-07", count: 3, last: "2002-09", viirs_start_index: 115 } },
+  cells: [[10, [0, 2], [5.5, 7]]],
+});
+
+test("decodeFrp has the decodeGrid shape: h is MW, classes come from grid.json meta, error model from frp.json", () => {
+  const g = decodeFrp(smallFrp(), null, meta);
+  assert.deepEqual(g.cells.get(10).h, [5.5, 7]);
+  assert.equal(g.nMonths, 3);
+  assert.equal(g.meta.classes, meta.classes);
+  assert.deepEqual(g.meta.error_model, frpJson.meta.error_model);
+  assert.deepEqual(g.meta.regions, meta.regions);
+  assert.equal(g.meta.experimental, false);
+  assert.equal(classify(g.meta, 1.6).id, "high");
+  // the shared functions run on it unchanged
+  assert.deepEqual([...zoneSeries(g, [10]).harmonized], [5.5, 0, 7]);
+});
+
+test("decodeFrp without grid.json meta falls back to the default classes", () => {
+  const g = decodeFrp(smallFrp());
+  assert.equal(classify(g.meta, 1.6).id, "high");
+  assert.equal(classify(g.meta, 0.1).id, "low");
+});
+
+test("decodeFrp takes current months from the 4th array and replaces the archive value", () => {
+  const cur = { cells: [[10, [2, 3], [9, 4], [123.4, 55.5]], [11, [3], [1], [0.7]]] };
+  const g = decodeFrp(smallFrp(), cur, meta);
+  assert.equal(g.nMonths, 4);
+  assert.deepEqual(g.cells.get(10).m, [0, 2, 3]);
+  assert.deepEqual(g.cells.get(10).h, [5.5, 123.4, 55.5]);
+  assert.deepEqual(g.cells.get(11).h, [0.7]);
+  assert.equal(g.noData.size, 0);
+  const s = zoneSeries(g, [10, 11]);
+  assert.equal(s.harmonized[3], 56.2);
+});
+
+test("a current month without FRP (file from before the 4th array) is no data, not 0 (Review Focus 3)", () => {
+  const cur = { cells: [[10, [2, 3], [9, 4]], [11, [3], [1]]] };
+  const g = decodeFrp(smallFrp(), cur, meta);
+  assert.deepEqual([...g.noData].sort(), [2, 3]);
+  assert.equal(g.nMonths, 4);
+  const s = zoneSeries(g, [10, 11]);
+  assert.ok(Number.isNaN(s.harmonized[2]) && Number.isNaN(s.harmonized[3]));
+  assert.equal(s.harmonized[0], 5.5); // earlier months are untouched
+  // a zone with no hotspot at all that month is also unknown, not a clean 0
+  assert.ok(Number.isNaN(zoneSeries(g, [99]).harmonized[3]));
+});
+
+test("a month where only some current cells carry FRP is no data", () => {
+  const cur = { cells: [[10, [3], [4], [8]], [11, [3], [1]]] };
+  const g = decodeFrp(smallFrp(), cur, meta);
+  assert.deepEqual([...g.noData], [3]);
+});
+
+test("verdict on a no-data month says noData and does not poison the history median", () => {
+  const g = decodeFrp(smallFrp(), { cells: [[10, [3], [4]]] }, meta);
+  const m = 3;
+  const series = new Float64Array(g.nMonths).fill(10);
+  series[m] = NaN;
+  const v = verdict(g, series, m);
+  assert.equal(v.noData, true);
+  assert.ok(Number.isNaN(v.value) && Number.isNaN(v.ratio));
+  assert.equal(v.rank, null);
+  // a NaN month inside the history is skipped, not propagated
+  const hist = new Float64Array(40).fill(10);
+  hist[15] = NaN; // the same calendar month one year back is unknown: only month 3 is left to compare
+  const v3 = verdict({ meta, cells: new Map(), nMonths: 40 }, hist, 27, 1);
+  assert.equal(v3.median, 10);
+  assert.equal(v3.yearsCompared, 1);
+});
+
+test("calendar marks a no-data month and keeps medians and totals finite", () => {
+  const g = decodeFrp(smallFrp(), { cells: [[10, [3], [4]]] }, meta);
+  const s = zoneSeries(g, [10]);
+  const cal = calendar(g, s.harmonized);
+  const cell = cal.rows[0].cells.find((c) => c && c.m === 3);
+  assert.equal(cell.noData, true);
+  assert.equal(cell.ratio, null);
+  assert.equal(cal.monthlyMedian[6], 5.5); // Jul: from data; Oct has no data at all, so its median is NaN
+  assert.ok(cal.rows.every((r) => Number.isFinite(r.total)));
+});
+
+test("departmentRanking returns nothing for a no-data month", () => {
+  const g = decodeFrp(smallFrp(), { cells: [[10, [3], [4]]] }, meta);
+  assert.deepEqual(departmentRanking(g, [{ id: "a", name: "A", cells: [10] }], 3), []);
+  assert.equal(departmentRanking(g, [{ id: "a", name: "A", cells: [10] }], 2).length, 1);
+});
+
+test("seriesToCSV in frp mode labels MW, drops raw sensor columns and leaves no-data months empty", () => {
+  const g = decodeFrp(smallFrp(), { cells: [[10, [3], [4]]] }, meta);
+  const s = zoneSeries(g, [10]);
+  const lines = seriesToCSV(g, s, { metric: "frp" }).trim().split("\n");
+  assert.equal(lines[0], "year,month,harmonized_frp_mw_viirs_equivalent,relative_error");
+  assert.match(lines[1], /^2002,7,5\.5,/);
+  assert.equal(lines[4], "2002,10,,");
+  assert.equal(lines.length, 5);
+  // default (counts) format is unchanged
+  assert.equal(seriesToCSV(g, zoneSeries(decodeGrid({ meta, cells: [] }), []))
+    .split("\n")[0], "year,month,harmonized_viirs_equivalent,relative_error,modis_raw_terra_aqua,viirs_snpp_raw");
+});
+
+test("validationSummary reads frp.json: `paraguay` key, p90, no class agreement (Review Focus 2 and 5)", () => {
+  const s = validationSummary(frpJson.meta);
+  assert.deepEqual(s.rows.map((r) => r.area), ["paraguay", "chaco", "oriental"]);
+  const lo = frpJson.meta.validation.leave_one_year_out;
+  for (const r of s.rows) {
+    assert.equal(r.classAgreementPct, null);
+    assert.equal(r.mdapePct, Math.round(lo[r.area].mdape_pct * 10) / 10);
+    assert.equal(r.p90Pct, Math.round(lo[r.area].p90_pct * 10) / 10);
+  }
+  assert.equal(s.spearman, null);
+  assert.equal(s.nMonths, 0);
+  // the count validation still reports its own numbers, without a p90
+  assert.equal(validationSummary(meta).rows[0].p90Pct, undefined);
+});
+
+test("real frp.json decodes on the grid.json index; FRP series of the country is positive and finite", () => {
+  const g = decodeFrp(frpJson, null, meta);
+  assert.equal(g.nMonths, meta.months.count);
+  const s = zoneSeries(g, [...g.cells.keys()]);
+  assert.ok(s.harmonized.every((x) => Number.isFinite(x) && x >= 0));
+  assert.ok(s.harmonized.some((x) => x > 1000));
+  const v = verdict(g, s.harmonized, indexOf(meta, 2024, 9));
+  assert.ok(Number.isFinite(v.ratio) && v.relativeError === 0);
 });

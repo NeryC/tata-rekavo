@@ -100,6 +100,20 @@ else {
   check(okCells && frp.meta.months.count === nm, `frp.json: ${frp.cells.length} cells on the grid.json index, ${nm} months`);
   console.log(`     FRP leave-one-year-out mdape: Paraguay ${lo.paraguay.mdape_pct}%, Chaco ${lo.chaco.mdape_pct}%, Oriental ${lo.oriental.mdape_pct}%` +
     (frp.meta.experimental ? " (experimental)" : ""));
+
+  // the decoded country FRP series is the sum of frp.json (plus current.json FRP when it carries it)
+  const fgrid = H.decodeFrp(frp, currentJson, gridJson.meta);
+  const fall = H.zoneSeries(fgrid, [...fgrid.cells.keys()]);
+  const nm0 = frp.meta.months.count;
+  const sums = new Float64Array(nm0);
+  for (const [, m, x] of frp.cells) for (let i = 0; i < m.length; i++) sums[m[i]] += x[i];
+  let worst = 0;
+  for (let m = 0; m < nm0; m++) worst = Math.max(worst, Math.abs(fall.harmonized[m] - sums[m]) / Math.max(1, sums[m]));
+  check(worst < 0.002, `country FRP series equals the sum of frp.json (max rel diff ${worst.toExponential(2)}, ${nm0} months)`);
+  const missing = [...fgrid.noData].sort((a, b) => a - b).map((m) => H.monthOf(fgrid.meta, m).label);
+  console.log(`     FRP months without data in current.json: ${missing.length ? missing.join(", ") : "none"}`);
+  const vf = H.verdict(fgrid, fall.harmonized, H.indexOf(fgrid.meta, 2024, 9));
+  console.log(`     FRP Sep 2024 Paraguay: ${vf.value.toFixed(0)} MW vs median ${vf.median.toFixed(0)} -> x${vf.ratio.toFixed(2)} ${vf.class.label}`);
 }
 
 process.exit(fails ? 1 : 0);

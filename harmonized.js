@@ -33,6 +33,55 @@ export function decodeGrid(gridJson, currentJson = null) {
   return { meta, cells, nMonths };
 }
 
+const DEFAULT_CLASSES = [
+  { id: "low", label: "Below normal", max: 0.5 }, { id: "normal", label: "Normal", max: 1.5 },
+  { id: "high", label: "High", max: 3 }, { id: "extreme", label: "Extreme", max: null },
+];
+
+/**
+ * Parse frp.json (and optionally current.json) into a Grid with the same shape as decodeGrid, so
+ * zoneSeries / verdict / calendar / departmentRanking / relativeError work unchanged on fire power (MW).
+ *
+ * - h holds the harmonized FRP in MW. frp.json carries no raw per-sensor series, so modis and viirs
+ *   repeat h (the raw-sensor view is not offered for FRP; naive equals harmonized).
+ * - meta is the frp.json meta (grid, months, error_model, validation, experimental) completed with what the
+ *   shared functions need and frp.json does not carry: classes and regions come from gridMeta (grid.json meta),
+ *   classes falling back to the default thresholds.
+ * - current.json months are observed S-NPP FRP, taken from the optional 4th array of each cell
+ *   ([idx, m[], n[], frp[]]). A current month whose cells lack that array (a file written before FRP was
+ *   added) is NOT zero: it is listed in grid.noData and zoneSeries reports NaN for it.
+ */
+export function decodeFrp(frpJson, currentJson = null, gridMeta = null) {
+  const fm = frpJson.meta;
+  const meta = {
+    ...(gridMeta ?? {}), ...fm,
+    classes: fm.classes ?? gridMeta?.classes ?? DEFAULT_CLASSES,
+    regions: fm.regions ?? gridMeta?.regions,
+  };
+  const cells = new Map();
+  let nMonths = meta.months.count;
+  for (const [idx, m, x] of frpJson.cells) cells.set(idx, { m: [...m], h: [...x], modis: [...x], viirs: [...x] });
+  const noData = new Set();
+  if (currentJson) {
+    for (const [idx, m, , frp] of currentJson.cells) {
+      const has = Array.isArray(frp) && frp.length === m.length;
+      for (let i = 0; i < m.length; i++) {
+        nMonths = Math.max(nMonths, m[i] + 1);
+        if (!has) noData.add(m[i]);
+      }
+      if (!has) continue;
+      const c = cells.get(idx) || { m: [], h: [], modis: [], viirs: [] };
+      for (let i = 0; i < m.length; i++) {
+        const k = c.m.indexOf(m[i]);
+        if (k >= 0) { c.h[k] = frp[i]; c.modis[k] = frp[i]; c.viirs[k] = frp[i]; }
+        else { c.m.push(m[i]); c.h.push(frp[i]); c.modis.push(frp[i]); c.viirs.push(frp[i]); }
+      }
+      cells.set(idx, c);
+    }
+  }
+  return { meta, cells, nMonths, noData };
+}
+
 /** Month index -> {year, month (1-12), label}. */
 export function monthOf(meta, m) {
   const [y0, mo0] = meta.months.first.split("-").map(Number);
@@ -102,29 +151,39 @@ export function zoneSeries(grid, cellIds) {
       harmonized[c.m[i]] += c.h[i]; modis[c.m[i]] += c.modis[i]; viirs[c.m[i]] += c.viirs[i];
     }
   }
+  // months with no data for this metric (FRP before current.json carried it) are unknown, not zero
+  if (grid.noData) for (const m of grid.noData) if (m < n) harmonized[m] = modis[m] = viirs[m] = NaN;
   // "naive" = what you get by stitching raw sensors: MODIS before VIIRS starts, VIIRS after
   const vs = grid.meta.months.viirs_start_index;
   const naive = Float64Array.from(harmonized, (_, m) => (m < vs ? modis[m] : viirs[m]));
   return { harmonized, modis, viirs, naive };
 }
 
-/** Validation panel summary: leave-one-year-out MdAPE and anomaly-class agreement for paraguay/chaco/oriental. */
+/**
+ * Validation panel summary: leave-one-year-out MdAPE (and, when published, the p90 error and the
+ * anomaly-class agreement) for paraguay/chaco/oriental. The country is read from `country` (grid.json)
+ * or `paraguay` (frp.json). classAgreementPct is null when absent (frp.json has none); p90Pct is only
+ * present on a row when the metric publishes it.
+ */
 export function validationSummary(meta) {
   const loyo = meta?.validation?.leave_one_year_out ?? {};
   const agree = meta?.validation?.anomaly_class_agreement ?? {};
   const rows = [];
-  for (const [area, key] of [["paraguay", "country"], ["chaco", "chaco"], ["oriental", "oriental"]]) {
+  for (const [area, keys] of [["paraguay", ["country", "paraguay"]], ["chaco", ["chaco"]], ["oriental", ["oriental"]]]) {
+    const key = keys.find((k) => typeof loyo[k]?.mdape_pct === "number");
+    if (!key) continue;
     const e = loyo[key];
-    if (!e || typeof e.mdape_pct !== "number") continue;
     const pct = agree[key]?.same_class_pct;
-    rows.push({
+    const row = {
       area,
       mdapePct: Math.round(e.mdape_pct * 10) / 10,
       classAgreementPct: typeof pct === "number" ? Math.round(pct) : null,
-    });
+    };
+    if (typeof e.p90_pct === "number") row.p90Pct = Math.round(e.p90_pct * 10) / 10;
+    rows.push(row);
   }
   const sp = agree.country?.spearman;
-  return { rows, spearman: typeof sp === "number" ? sp : null, nMonths: loyo.country?.n ?? 0 };
+  return { rows, spearman: typeof sp === "number" ? sp : null, nMonths: loyo.country?.n ?? loyo.paraguay?.n ?? 0 };
 }
 
 /** Relative error band (median absolute relative error) for a zone-month value. */
@@ -137,6 +196,7 @@ export function relativeError(meta, m, value) {
 }
 
 function median(a) {
+  a = a.filter((x) => x === x); // NaN = month with no data: not part of the history
   if (!a.length) return NaN;
   const s = [...a].sort((x, y) => x - y), k = Math.floor(s.length / 2);
   return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2;
@@ -175,12 +235,19 @@ export function verdict(grid, series, m, coverage = 1) {
   const meta = grid.meta;
   const value = series[m];
   const history = [];
-  for (let k = m - 12; k >= 0; k -= 12) history.push(series[k]);
+  for (let k = m - 12; k >= 0; k -= 12) if (series[k] === series[k]) history.push(series[k]);
   const med = median(history) * coverage;
-  const ratio = med > 0 ? value / med : (value > 0 ? Infinity : 1);
   const { label, year, month } = monthOf(meta, m);
+  if (value !== value) {
+    // no data for this month (NaN): nothing to compare. `class` is a placeholder; callers must check noData first
+    return {
+      m, label, year, month, value, median: med, ratio: NaN, coverage, partial: coverage < 1, noData: true,
+      class: classify(meta, 1), relativeError: 0, yearsCompared: history.length, rank: null,
+    };
+  }
+  const ratio = med > 0 ? value / med : (value > 0 ? Infinity : 1);
   return {
-    m, label, year, month, value, median: med, ratio, coverage, partial: coverage < 1,
+    m, label, year, month, value, median: med, ratio, coverage, partial: coverage < 1, noData: false,
     class: classify(meta, ratio),
     relativeError: relativeError(meta, m, value),
     yearsCompared: history.length,
@@ -200,6 +267,7 @@ const LOW_SIGNAL_MEDIAN = 10;
  * Returns [{id, name, value, median, ratio, classId, relativeError, lowSignal, partial}].
  */
 export function departmentRanking(grid, departments, m, coverage = 1) {
+  if (grid.noData?.has(m)) return []; // month with no data for this metric: nothing to rank
   const rows = departments.map((d) => {
     const v = verdict(grid, zoneSeries(grid, d.cells).harmonized, m, coverage);
     return {
@@ -221,7 +289,7 @@ export function calendar(grid, series) {
   const meta = grid.meta, n = grid.nMonths;
   const first = monthOf(meta, 0), last = monthOf(meta, n - 1);
   const byMonth = Array.from({ length: 12 }, () => []);
-  for (let m = 0; m < n; m++) byMonth[monthOf(meta, m).month - 1].push(series[m]);
+  for (let m = 0; m < n; m++) if (series[m] === series[m]) byMonth[monthOf(meta, m).month - 1].push(series[m]);
   const med = byMonth.map(median);
   const rows = [];
   for (let y = first.year; y <= last.year; y++) {
@@ -229,10 +297,12 @@ export function calendar(grid, series) {
     for (let mo = 1; mo <= 12; mo++) {
       const m = indexOf(meta, y, mo);
       if (m < 0 || m >= n) { cells.push(null); continue; }
-      const v = series[m], ratio = med[mo - 1] > 0 ? v / med[mo - 1] : null;
+      const v = series[m];
+      if (v !== v) { cells.push({ m, value: NaN, ratio: null, class: null, relativeError: 0, noData: true }); continue; }
+      const ratio = med[mo - 1] > 0 ? v / med[mo - 1] : null;
       cells.push({ m, value: v, ratio, class: ratio === null ? null : classify(meta, ratio).id, relativeError: relativeError(meta, m, v) });
     }
-    rows.push({ year: y, cells, total: cells.reduce((s, c) => s + (c ? c.value : 0), 0) });
+    rows.push({ year: y, cells, total: cells.reduce((s, c) => s + (c && !c.noData ? c.value : 0), 0) });
   }
   return { rows, monthlyMedian: med };
 }
@@ -253,12 +323,20 @@ export function decodeBurnHistory(json) {
   };
 }
 
-/** CSV text of a zone series, for the download button. */
-export function seriesToCSV(grid, s) {
-  const lines = ["year,month,harmonized_viirs_equivalent,relative_error,modis_raw_terra_aqua,viirs_snpp_raw"];
+/**
+ * CSV text of a zone series, for the download button. metric "frp" labels the value as MW and drops the
+ * raw-sensor columns (frp.json has none); a month with no data is left empty.
+ */
+export function seriesToCSV(grid, s, { metric = "count" } = {}) {
+  const frp = metric === "frp";
+  const lines = [frp
+    ? "year,month,harmonized_frp_mw_viirs_equivalent,relative_error"
+    : "year,month,harmonized_viirs_equivalent,relative_error,modis_raw_terra_aqua,viirs_snpp_raw"];
   for (let m = 0; m < grid.nMonths; m++) {
     const { year, month } = monthOf(grid.meta, m);
-    lines.push([year, month, s.harmonized[m].toFixed(1), relativeError(grid.meta, m, s.harmonized[m]).toFixed(3), s.modis[m], s.viirs[m]].join(","));
+    const v = s.harmonized[m];
+    if (frp) lines.push([year, month, v === v ? v.toFixed(1) : "", v === v ? relativeError(grid.meta, m, v).toFixed(3) : ""].join(","));
+    else lines.push([year, month, v.toFixed(1), relativeError(grid.meta, m, v).toFixed(3), s.modis[m], s.viirs[m]].join(","));
   }
   return lines.join("\n") + "\n";
 }
