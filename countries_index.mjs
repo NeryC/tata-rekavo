@@ -7,13 +7,13 @@ import { join } from "node:path";
 
 export const DEFAULT_ISO3 = "PRY";
 // display extras the pipeline config does not carry: Spanish name (when it differs), time zone of the "updated" line,
-// and the example point of the coordinates form
+// the example point of the coordinates form, and pilot (country median error above the 15 % gate: tagged in the selector)
 const EXTRA = {
   PRY: { tz: "America/Asuncion", tzCity: "Asunción", example: [-22.35, -60.03] },
   BOL: { tz: "America/La_Paz", tzCity: "La Paz", example: [-16.37, -60.96] },
-  ECU: { tz: "America/Guayaquil", tzCity: "Guayaquil", example: [-0.9, -77.8] },
+  ECU: { tz: "America/Guayaquil", tzCity: "Guayaquil", example: [-0.9, -77.8], pilot: true },
   PER: { nameEs: "Perú", tz: "America/Lima", tzCity: "Lima", example: [-9.0, -74.5] },
-  URY: { tz: "America/Montevideo", tzCity: "Montevideo", example: [-31.7, -55.98] },
+  URY: { tz: "America/Montevideo", tzCity: "Montevideo", example: [-31.7, -55.98], pilot: true },
 };
 
 export function countryPath(iso3) {
@@ -28,7 +28,7 @@ export function buildIndex(config, dataDir) {
     const x = EXTRA[iso3] ?? {};
     countries.push({
       iso3, path, area: c.area, name: { en: c.name, es: x.nameEs ?? c.name }, bbox: c.bbox,
-      ...(x.tz ? { tz: x.tz, tzCity: x.tzCity } : {}), ...(x.example ? { example: x.example } : {}),
+      ...(x.tz ? { tz: x.tz, tzCity: x.tzCity } : {}), ...(x.example ? { example: x.example } : {}), ...(x.pilot ? { pilot: true } : {}),
     });
   }
   countries.sort((a, b) => (a.iso3 === DEFAULT_ISO3 ? -1 : b.iso3 === DEFAULT_ISO3 ? 1 : a.iso3.localeCompare(b.iso3)));
