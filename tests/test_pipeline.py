@@ -313,6 +313,27 @@ def test_department_slug_and_name():
     assert firms_pipeline.dept_slug("Ñeembucú") == "neembucu"
 
 
+def _two_squares_geojson():
+    ft = lambda name, x0: {"type": "Feature", "properties": {"shapeName": name},
+                           "geometry": {"type": "Polygon", "coordinates": [_square(x0, 0.0, x0 + 1.0, 1.0)]}}
+    return {"type": "FeatureCollection", "features": [ft("Mainland", 0.0), ft("Galápagos", 10.0)]}
+
+
+def _tiny_country(departments):
+    return CountryConfig(iso3="XXX", firms_name="Xxx", bbox=(0, 0, 2, 1), deg=0.5, lat0=0.0, lon0=0.0, rows=2, cols=4,
+                         regions={"kind": "biome", "names": []}, export_hotspots=False, burn_history=False, departments=departments)
+
+
+def test_departments_drop_leaves_out_units_outside_the_grid():
+    grid = {"meta": {"grid": {"deg": 0.5, "lat0": 0.0, "lon0": 0.0, "rows": 2, "cols": 4}}, "cells": [[0], [1], [4], [5]]}
+    cfg = _tiny_country({"names": {"mainland": "Mainland"}, "drop": ["galapagos"]})
+    deps = firms_pipeline.build_departments(_two_squares_geojson(), grid, cfg)
+    assert [d["id"] for d in deps] == ["mainland"] and deps[0]["cells"] == [0, 1, 4, 5]
+    # without the drop entry the unexpected unit is still an error (a typo in countries.json must not pass silently)
+    with pytest.raises(ValueError, match="galapagos"):
+        firms_pipeline.build_departments(_two_squares_geojson(), grid, _tiny_country({"names": {"mainland": "Mainland"}}))
+
+
 def test_departments_real_data():
     gj = ROOT / "data" / "ext" / "pry_adm1.geojson"
     if not gj.exists():

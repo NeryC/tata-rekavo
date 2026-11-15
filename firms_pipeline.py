@@ -1587,11 +1587,12 @@ def _dist_to_geom(pt, geom):
 def build_departments(geojson, grid, cfg: CountryConfig, report=None):
     """geoBoundaries ADM1 FeatureCollection + grid.json -> list of department dicts
     {id, name, cells, bbox, geometry}. Display names (the source file may lack accents) and merged units
-    (Paraguay: Asuncion into Central) come from cfg.departments, keyed by slug. Grid cells whose centre falls
+    (Paraguay: Asuncion into Central) come from cfg.departments, keyed by slug; "drop" lists the slugs left out. Grid cells whose centre falls
     outside every polygon (border cells of the 0.1-degree grid vs the simplified outline) are assigned to
     the department with the nearest boundary, provided the centre is within one cell diagonal of it.
     If `report` (a dict) is given it receives the coverage before/after that step."""
     names, merge = cfg.departments.get("names"), cfg.departments.get("merge", {})
+    drop = set(cfg.departments.get("drop", ()))   # slugs left out (Ecuador: Galapagos, outside the mainland grid)
     g = grid["meta"]["grid"]
     cell_ids = {int(c[0]) for c in grid["cells"]}
     units, found = {}, {}
@@ -1599,6 +1600,8 @@ def build_departments(geojson, grid, cfg: CountryConfig, report=None):
         props = ft["properties"]
         raw = props.get("shapeName") or props.get("name")
         slug = merge.get(dept_slug(raw), dept_slug(raw))
+        if slug in drop:
+            continue
         units.setdefault(slug, []).append(ft["geometry"])
         found.setdefault(slug, raw)
     if names is None:   # no departments block in countries.json: ids and names as in the source file
