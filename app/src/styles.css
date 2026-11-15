@@ -159,12 +159,14 @@ details p { margin-top: 6px; color: var(--ink-2); max-width: 62ch; }
 
 /* ---------- calendar ---------- */
 .calendar { position: relative; }
+.cal-instructions { font-size: 13px; color: var(--ink-2); margin-bottom: 8px; }
+.cal-scroll { overflow-x: auto; }
 .cal-grid { display: flex; flex-direction: column; gap: 2px; }
 .cal-head, .cal-row { display: grid; grid-template-columns: 42px repeat(12, 1fr) 42px; gap: 2px; align-items: center; }
 .cal-mh { font-size: 13px; color: var(--muted); text-align: center; }
 .cal-mh.total, .cal-total { text-align: right; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cal-year { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.cal-cell { height: 20px; border: 0; border-radius: 3px; padding: 0; }
+.cal-cell { height: 28px; border: 0; border-radius: 3px; padding: 0; }
 .cal-cell.empty { background: transparent; cursor: default; }
 .cal-cell.static { cursor: default; }
 .cal-cell.translated { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0 2px, transparent 2px 5px) !important; }
@@ -215,6 +217,9 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 
 /* ---------- map ---------- */
 .map-wrap { position: relative; min-height: 0; }
+.map-warning { position: absolute; z-index: 2; top: 12px; left: 12px; right: 62px; padding: 10px 12px; border-radius: 8px; background: #fff8e8; color: #332817; box-shadow: 0 0 0 1px var(--edge); font-size: 14px; }
+.map-warning button { min-height: 32px; margin-left: 6px; }
+.g-notice { font-size: 13px; line-height: 1.4; }
 .map { position: absolute; inset: 0; font-family: inherit; }
 .draw-hint { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100% - 120px); padding: 10px 14px; border-radius: 10px; background: var(--night); color: #fff; font-size: 14px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3); }
 .draw-hint button { min-height: 36px; padding: 0 12px; border: 0; border-radius: 7px; background: #2a78d6; color: #fff; font-size: 14px; }
@@ -246,7 +251,10 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 
 /* ---------- phones: the header notice only shows when the data is stale ---------- */
 @media (max-width: 600px) {
-  .top .updated:not(.stale) { display: none; }
+  .cal-grid { min-width: 440px; }
+}
+@media (max-width: 360px) {
+  .area-tools { grid-template-columns: 1fr; }
 }
 
 /* ---------- phones: answer first, then the map, then the detail ---------- */
@@ -401,3 +409,4 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 @media (max-width: 860px) {
   .panel > section.glance { order: 0; margin: 12px 16px 4px; }
 }
+

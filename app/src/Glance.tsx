@@ -35,6 +35,7 @@ export default function Glance({ country, countries, monthTitle, now, top, hasDe
   return (
     <section className="glance" aria-labelledby="glance-title">
       <h2 id="glance-title">{t.glanceTitle(name, monthTitle)}</h2>
+      <p className="g-notice">{t.glanceNotice}</p>
       {now && (
         <p className="g-now">
           <span className={`g-chip c-${now.classId}`}><span aria-hidden>{ICON[now.classId]}</span> {t.classes[now.classId]}</span>
@@ -90,3 +91,4 @@ export default function Glance({ country, countries, monthTitle, now, top, hasDe
     </section>
   );
 }
+

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import * as H from "@core";
 import type { Grid } from "@core";
 import { useI18n } from "./i18n";
+import { calendarTarget } from "./calendarNavigation";
 
 // diverging blue <-> red around "normal" (ratio to the median of the same calendar month)
 export const BINS: { max: number; color: string; label: string }[] = [
@@ -57,7 +58,10 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
   const cal = useMemo(() => H.calendar(grid, series), [grid, series]);
   const scale = useMemo(() => countScale([...series, ...cal.monthlyMedian]), [series, cal]);
   const [tip, setTip] = useState<{ x: number; y: number; html: string[] } | null>(null);
+  const [focused, setFocused] = useState<number | null>(null);
   const rows = [...cal.rows].reverse();
+  const available = rows.flatMap(row => row.cells.filter(c => c && coverage(c.m) !== 0).map(c => c!.m));
+  const tabMonth = focused !== null && available.includes(focused) ? focused : available.includes(selected) ? selected : available[0];
   const binLabel = (l: string) => (l === "≈ normal" ? t.normalBin : i18n.lang === "es" ? l.replace(".", ",") : l);
   const typicalTotal = cal.monthlyMedian.reduce((a, b) => a + b, 0);
   const rangeIsAll = range[0] <= 0 && range[1] >= grid.nMonths - 1;
@@ -65,7 +69,15 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
 
   return (
     <div className="calendar" onMouseLeave={() => setTip(null)}>
-      <div className="cal-grid" role="grid" aria-label={t.calendarAria}>
+      <p className="cal-instructions">{t.calendarInstructions}</p>
+      <div className="cal-scroll"><div className="cal-grid" role="grid" aria-label={t.calendarAria} onKeyDown={(e) => {
+        const current = Number((e.target as HTMLElement).dataset.month);
+        if (!Number.isFinite(current)) return;
+        const target = calendarTarget(available, current, e.key);
+        if (target === null) return;
+        e.preventDefault();
+        (e.currentTarget.querySelector(`[data-month="${target}"]`) as HTMLButtonElement | null)?.focus();
+      }}>
         <div className="cal-head" role="row">
           <span />
           {i18n.initials.map((l, i) => <span key={i} className="cal-mh" role="columnheader" aria-label={i18n.monthShort(i + 1)}>{l}</span>)}
@@ -92,7 +104,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
               if (c.noData) { // a month the active measure has no data for: not zero, and still selectable
                 const label = `${i18n.monthLabel(row.year, i + 1)}, ${t.calNoData}`;
                 return (
-                  <button key={i} role="gridcell" aria-label={label} aria-selected={c.m === selected}
+                  <button key={i} role="gridcell" aria-label={label} aria-selected={c.m === selected} data-month={c.m} tabIndex={c.m === tabMonth ? 0 : -1} onFocus={() => setFocused(c.m)}
                     className={`cal-cell nodata${c.m === selected ? " sel" : ""}`} onClick={() => onSelect(c.m)}
                     onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: [i18n.monthLabel(row.year, i + 1), t.calNoData] })} />
                 );
@@ -122,7 +134,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
                 `🐺 ${catadorInsight}`,
               ];
               return (
-                <button key={i} role="gridcell" aria-label={lines.join(", ")} aria-selected={c.m === selected}
+                <button key={i} role="gridcell" aria-label={lines.join(", ")} aria-selected={c.m === selected} data-month={c.m} tabIndex={c.m === tabMonth ? 0 : -1} onFocus={() => setFocused(c.m)}
                   className={`cal-cell${c.m === selected ? " sel" : ""}${err > 0 ? " translated" : ""}${cov < 1 ? " partial" : ""}${!out && !rangeIsAll ? " in" : ""}`}
                   style={{ background: color }}
                   onClick={() => onSelect(c.m)}
@@ -132,7 +144,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
             <span className="cal-total">{row.cells.every((c) => !c || c.noData) ? "—" : row.total >= 1000 ? `${Math.round(row.total / 1000)}k` : num(row.total)}</span>
           </div>
         ))}
-      </div>
+      </div></div>
       <div className="cal-legend">
         {mode === "ratio"
           ? BINS.map((b) => <span key={b.label}><i style={{ background: b.color }} />{binLabel(b.label)}</span>)
@@ -151,3 +163,4 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
     </div>
   );
 }
+

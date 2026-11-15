@@ -65,6 +65,8 @@ export default function MapView(p: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
+  const [baseUnavailable, setBaseUnavailable] = useState(false);
+  const [mapAttempt, setMapAttempt] = useState(0);
   const homeBtn = useRef<HTMLButtonElement | null>(null);
   const [draft, setDraft] = useState<number[][]>([]);
   const draftRef = useRef<number[][]>([]);
@@ -84,6 +86,7 @@ export default function MapView(p: Props) {
         if (r.ok) style = STYLE_URL;
       } catch { /* offline: plain background */ }
       if (cancelled || !box.current) return;
+      setBaseUnavailable(style === FALLBACK_STYLE);
       const m = new maplibregl.Map({
         container: box.current, style, bounds: props.current.countryBBox,
         fitBoundsOptions: { padding: 24 }, attributionControl: { compact: true },
@@ -178,7 +181,7 @@ export default function MapView(p: Props) {
       map.current = m;
     })();
     return () => { cancelled = true; map.current?.remove(); map.current = null; };
-  }, []);
+  }, [mapAttempt]);
 
   const resetView = () => {
     const m = map.current;
@@ -279,6 +282,7 @@ export default function MapView(p: Props) {
   return (
     <div className="map-wrap">
       <div ref={box} className="map" />
+      {baseUnavailable && <div className="map-warning" role="status">{t.mapBaseUnavailable} <button type="button" onClick={() => { setReady(false); setMapAttempt(n => n + 1); }}>{t.mapRetry}</button></div>}
       {p.drawing && (
         <div className="draw-hint" role="status">
           <span>{t.drawHint}</span>
@@ -298,3 +302,4 @@ export default function MapView(p: Props) {
     </div>
   );
 }
+
