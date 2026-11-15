@@ -13,7 +13,10 @@ Subcommands
   build-regions  Department boundaries (geoBoundaries ADM1) and which grid cells belong to each department; biome countries
                  also get regions.json (grid cells of each factor region)
   build-context  Fire statistics per protected area (WDPA): monthly harmonized hotspots and FRP inside each area; statistics only,
-                 never geometry (WDPA terms forbid publishing downloadable WDPA data or spatial derivatives)
+                 never geometry (WDPA terms forbid publishing downloadable WDPA data or spatial derivatives);
+                 --layer indigenous does the same for the indigenous territories of LandMark (indigenous.json)
+  extract-landmark  One country's indigenous / community territories from the LandMark shapefile (Web Mercator -> lon/lat), written to
+                 a private, gitignored GeoJSON that build-context --layer indigenous reads; never published
 
 Method (short)
   Unit: "VIIRS S-NPP-equivalent hotspots".
@@ -1752,10 +1755,89 @@ WDPA_TERMS = "Only fire statistics per protected area are published; no WDPA geo
 CONTEXT_UNIT = ("n = VIIRS S-NPP-equivalent hotspots per month (2002-07..2025-12 harmonized archive; 2026 observed VIIRS, weight 1); "
                 "frp = sum of harmonized Fire Radiative Power in MW per month (2026 observed); m = month index as in grid.json")
 WDPA_RETRIEVED = "2026-11-14"   # date the WDPA / WD-OECM November 2026 release was downloaded from protectedplanet.net
+INDIGENOUS_SOURCE = "LandMark: Indigenous Peoples' and Local Community Lands and Territories, v202606"
+INDIGENOUS_CITATION = ("LandMark: The Global Platform of Indigenous and Community Lands (2026), Indigenous Peoples' and Local Community Lands "
+                       "and Territories, v202606, https://landmarkmap.org")
+INDIGENOUS_LICENSE = "CC BY-SA 4.0"
+INDIGENOUS_TERMS = ("LandMark Terms of Service (26 Aug 2024): content may be copied, adapted and distributed under CC BY-SA 4.0 with "
+                    "responsible use that protects the rights of Indigenous Peoples; only fire statistics per territory are published, "
+                    "no LandMark geometry (no polygons, bounding boxes or centroids)")
+INDIGENOUS_RETRIEVED = "2026-11-15"   # date the LandMark v202606 download was taken from landmarkmap.org
+INDIGENOUS_INPUT = "data/raw/ext/derived/indigenous_{iso3}.geojson"   # private output of extract-landmark
+LANDMARK_SHP = "data/raw/ext/landmark/Indigenous_comm_lands_public_202606/shp/LandMark_IP_LC_poly_public_v202606.shp"
+LANDMARK_LAYERS = ("Indigenous Lands", "Community Lands")
 CONTEXT_OVERLAP_NOTE = ("departments / regions of an area = those with at least one 0.1-degree grid-cell centre inside the area "
                         "or at least one hotspot inside the area; hotspots count in every area that contains them, zones count the "
                         "union of areas (each hotspot once); by_zone = the area's own series restricted to one department or region "
                         "(hotspots inside the area AND inside that zone; only zones where it is not empty)")
+
+
+def web_mercator_to_lonlat(x, y):
+    """WGS 84 Web Mercator (EPSG:3857, metres) -> (lon, lat) degrees, vectorised."""
+    r = 6378137.0
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    return np.degrees(x / r), np.degrees(2.0 * np.arctan(np.exp(y / r)) - np.pi / 2.0)
+
+
+def landmark_keep(rec, iso3):
+    """Records of the LandMark layer that are published for one country: downloadable ("download" = Yes), of the Indigenous Lands or
+    Community Lands layers. rec: dict of the DBF fields."""
+    return (str(rec.get("iso_code") or "").strip().upper() == iso3.upper() and str(rec.get("download") or "").strip() == "Yes"
+            and str(rec.get("layer") or "").strip() in LANDMARK_LAYERS)
+
+
+def _lonlat_rings(coords, depth):
+    """Convert nested Web Mercator GeoJSON coordinates (depth 1 = a ring, 2 = polygon, 3 = multipolygon) to lon/lat, rounded to 5 decimals
+    (about a metre)."""
+    if depth == 1:
+        lon, lat = web_mercator_to_lonlat([p[0] for p in coords], [p[1] for p in coords])
+        return [[round(float(a), 5), round(float(b), 5)] for a, b in zip(lon, lat)]
+    return [_lonlat_rings(c, depth - 1) for c in coords]
+
+
+def landmark_features(shp_path, iso3):
+    """GeoJSON features (lon/lat) of one country from the LandMark polygon shapefile, with only the fields the statistics need
+    (id = landmark_i, name, identity, category, ethnicity = ethncty_1, data_src, data_ctrb).
+    Streams the file: the DBF is read record by record to find the country, then only those shapes are read, so the 1.8 GB shapefile is
+    never loaded. The DBF says UTF-8 but some strings are latin-1: each one is decoded as UTF-8 when it is valid and as latin-1 otherwise."""
+    import shapefile   # pyshp, only needed here
+    rd = shapefile.Reader(shp_path, encoding="latin-1")
+    picked = []
+    for i, rec in enumerate(rd.iterRecords()):
+        d = rec.as_dict()
+        if landmark_keep(d, iso3):
+            picked.append((i, {k: (_fix_mojibake(d.get(src)) or "").strip() for k, src in
+                               (("id", "landmark_i"), ("name", "name"), ("identity", "identity"), ("category", "category"),
+                                ("ethnicity", "ethncty_1"), ("data_src", "data_src"), ("data_ctrb", "data_ctrb"))}))
+    feats = []
+    for i, props in picked:
+        shp = rd.shape(i)
+        if not shp.points:
+            log(f"{props['id']}: no geometry, skipped")
+            continue
+        gj = shp.__geo_interface__
+        depth = {"Polygon": 2, "MultiPolygon": 3}.get(gj["type"])
+        if depth is None:
+            log(f"{props['id']}: {gj['type']} is not a polygon, skipped")
+            continue
+        feats.append({"type": "Feature", "properties": props, "geometry": {"type": gj["type"], "coordinates": _lonlat_rings(gj["coordinates"], depth)}})
+    return feats
+
+
+def cmd_extract_landmark(args):
+    iso3 = args.country.upper()
+    if not os.path.exists(args.landmark):
+        sys.exit(f"{args.landmark} not found. Download LandMark 'Indigenous Peoples' and Local Community Lands and Territories' (v202606) "
+                 "from https://landmarkmap.org and unzip it under data/raw/ext/landmark/: see data/ext/README.md, section 'indigenous territories'.")
+    feats = landmark_features(args.landmark, iso3)
+    if not feats:
+        sys.exit(f"no downloadable Indigenous Lands / Community Lands polygons for {iso3} in {args.landmark}")
+    out = args.out or INDIGENOUS_INPUT.format(iso3=iso3)
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"type": "FeatureCollection", "features": feats}, fh, separators=(",", ":"), ensure_ascii=False)
+    atomic_replace([out + ".tmp"])
+    log(f"{out}: {len(feats)} territories of {iso3} (private file, never published), {os.path.getsize(out):,} bytes")
 
 
 def _fix_mojibake(text):
@@ -1881,14 +1963,91 @@ def _harmonized_hotspots(cfg, data_dir, current_csv, in_memory=False):
     return v.reset_index(drop=True), through, through_day, cfg
 
 
+def _context_centres(cfg, h, cell_dept):
+    """Hotspot -> department column and grid-cell centres with their department / region (the overlap lists of a context file)."""
+    g = cfg.grid
+    r, c, ok = cell_of(h.latitude.values, h.longitude.values, g)
+    cell = np.where(ok, g.index(r, c), -1)
+    h["dept"] = pd.Series(cell).map(cell_dept).to_numpy(dtype=object)
+    ids = sorted(cell_dept)
+    cr, cc = np.divmod(np.array(ids, dtype=np.int64), g.cols)
+    clon, clat = g.lon0 + (cc + 0.5) * g.deg, g.lat0 + (cr + 0.5) * g.deg
+    return {"lon": clon, "lat": clat, "dept": np.array([cell_dept[i] for i in ids], dtype=object),
+            "region": np.asarray(region_of(clat, clon, cfg), dtype=object)}
+
+
+def _protected_record(a, s):
+    p = a["props"]
+    return {"id": a["id"], "name": _fix_mojibake(p.get("NAME")), "desig": _fix_mojibake(p.get("DESIG_ENG")),
+            "desig_type": _fix_mojibake(p.get("DESIG_TYPE")), "iucn": _fix_mojibake(p.get("IUCN_CAT")),
+            "departments": s["departments"], "regions": s["regions"],
+            "m": s["m"], "n": s["n"], "frp": s["frp"], "by_zone": s["by_zone"]}
+
+
+def _compact_series(ser):
+    """The same {"m", "n", "frp"} with whole numbers written as integers (3 instead of 3.0): the same value in JSON, fewer bytes."""
+    return {"m": ser["m"], "n": [int(v) if v == int(v) else v for v in ser["n"]], "frp": [int(v) if v == int(v) else v for v in ser["frp"]]}
+
+
+def _indigenous_record(a, s):
+    """A territory's record. To keep indigenous.json small (thousands of territories), `by_zone` holds only the zones where the
+    territory's series differs from its whole series (meta.by_zone_default = "whole": a listed zone without an entry has the whole
+    series, which is where most territories lie, fire-wise, entirely); a listed zone with no fire inside gets an explicit empty series."""
+    p = a["props"]
+    rec = {"id": a["id"], "name": p.get("name"), "identity": p.get("identity"), "category": p.get("category")}
+    if p.get("ethnicity"):   # the field is empty for many territories: omitted then
+        rec["ethnicity"] = p["ethnicity"]
+    own = _compact_series(s)
+    by_zone = {}
+    for z in sorted(set(s["departments"]) | set(s["regions"])):
+        zs = _compact_series(s["by_zone"].get(z, {"m": [], "n": [], "frp": []}))
+        if zs != own:
+            by_zone[z] = zs
+    return {**rec, "departments": s["departments"], "regions": s["regions"], **own, "by_zone": by_zone}
+
+
+def _indigenous_contributors(areas):
+    """Distinct data contributors / sources of the territories of one country (the credit LandMark asks for): data_ctrb first, then
+    data_src, each sorted; the generic "Publicly available" is not a contributor name."""
+    seen, out = set(), []
+    for key in ("data_ctrb", "data_src"):
+        for v in sorted({str(a["props"].get(key) or "").strip() for a in areas}):
+            if v and v.lower() != "publicly available" and v.lower() not in seen:
+                seen.add(v.lower())
+                out.append(v)
+    return out
+
+
+def _context_layer(layer, args, areas=None):
+    """Settings of one build-context layer: where its polygons come from, which file it writes, how an area becomes a record, and the
+    layer-specific part of meta (the source / citation / terms; the dates and the unit are shared)."""
+    if layer == "indigenous":
+        return {"input": args.input or INDIGENOUS_INPUT.format(iso3=args.country.upper()), "file": "indigenous.json",
+                "id": lambda f: str(f["properties"]["id"]), "record": _indigenous_record, "what": "indigenous territories",
+                "hint": "Extract it from the LandMark download first: python firms_pipeline.py extract-landmark --country "
+                        f"{args.country.upper()} (see data/ext/README.md, section 'indigenous territories').",
+                "meta": lambda: {"source": INDIGENOUS_SOURCE, "citation": INDIGENOUS_CITATION, "license": INDIGENOUS_LICENSE,
+                                 "terms": INDIGENOUS_TERMS, "contributors": _indigenous_contributors(areas), "layer": "indigenous",
+                                 "by_zone_default": "whole"},
+                "retrieved": INDIGENOUS_RETRIEVED}
+    return {"input": args.input or args.wdpa, "file": "context.json", "id": lambda f: str(f["properties"]["SITE_ID"]),
+            "record": _protected_record, "what": "protected areas",
+            "hint": "Prepare it from the WDPA download first (mapshaper step): see data/ext/README.md, section 'protected_areas.geojson'.",
+            "meta": lambda: {"source": WDPA_SOURCE, "citation": WDPA_CITATION, "terms": WDPA_TERMS}, "retrieved": WDPA_RETRIEVED}
+
+
 def cmd_build_context(args):
+    """Fire statistics per protected area (WDPA, context.json) or per indigenous territory (LandMark, indigenous.json): the same
+    method for both (--layer); only the polygons, the record fields and the source credit differ."""
+    layer = getattr(args, "layer", None) or "protected"
     cfg = load_country(args.country)
-    if not os.path.exists(args.wdpa):
-        sys.exit(f"{args.wdpa} not found. Prepare it from the WDPA download first (mapshaper step): see data/ext/README.md, "
-                 "section 'protected_areas.geojson'. That file stays private (gitignored); only context.json is published.")
-    with open(args.wdpa, encoding="utf-8") as fh:
+    lay = _context_layer(layer, args)
+    if not os.path.exists(lay["input"]):
+        sys.exit(f"{lay['input']} not found. {lay['hint']} That file stays private (gitignored); only {lay['file']} is published.")
+    with open(lay["input"], encoding="utf-8") as fh:
         feats = json.load(fh)["features"]
-    areas = [{"id": str(f["properties"]["SITE_ID"]), "geometry": f["geometry"], "props": f["properties"]} for f in feats]
+    areas = [{"id": lay["id"](f), "geometry": f["geometry"], "props": f["properties"]} for f in feats]
+    lay = _context_layer(layer, args, areas)
     dp = os.path.join(args.out, "departments.json")
     cell_dept = {}
     if os.path.exists(dp):
@@ -1897,36 +2056,24 @@ def cmd_build_context(args):
     else:
         log("departments.json missing: no department zones or overlaps")
     h, through, through_day, cfg = _harmonized_hotspots(cfg, args.data, os.path.join(args.out, "current_hotspots.csv"), _in_memory(args))
-    g = cfg.grid
-    r, c, ok = cell_of(h.latitude.values, h.longitude.values, g)
-    cell = np.where(ok, g.index(r, c), -1)
-    h["dept"] = pd.Series(cell).map(cell_dept).to_numpy(dtype=object)
-    ids = sorted(cell_dept)
-    cr, cc = np.divmod(np.array(ids, dtype=np.int64), g.cols)
-    clon, clat = g.lon0 + (cc + 0.5) * g.deg, g.lat0 + (cr + 0.5) * g.deg
-    centres = {"lon": clon, "lat": clat, "dept": np.array([cell_dept[i] for i in ids], dtype=object),
-               "region": np.asarray(region_of(clat, clon, cfg), dtype=object)}
-    log(f"{len(h):,} hotspots, {len(areas)} protected areas")
+    centres = _context_centres(cfg, h, cell_dept)
+    log(f"{len(h):,} hotspots, {len(areas)} {lay['what']}")
     stats = context_stats(h, areas, cfg.area, centres=centres)
-    out_areas = []
-    for a in areas:
-        p, s = a["props"], stats["areas"][a["id"]]
-        out_areas.append({"id": a["id"], "name": _fix_mojibake(p.get("NAME")), "desig": _fix_mojibake(p.get("DESIG_ENG")),
-                          "desig_type": _fix_mojibake(p.get("DESIG_TYPE")), "iucn": _fix_mojibake(p.get("IUCN_CAT")),
-                          "departments": s["departments"], "regions": s["regions"],
-                          "m": s["m"], "n": s["n"], "frp": s["frp"], "by_zone": s["by_zone"]})
+    out_areas = [lay["record"](a, stats["areas"][a["id"]]) for a in areas]
     order = [cfg.area] + cfg.region_names + sorted(set(cell_dept.values()))
     zones = {z: stats["zones"].get(z, {"m": [], "n": [], "frp": []}) for z in order}
-    doc = {"meta": {"source": WDPA_SOURCE, "citation": WDPA_CITATION, "terms": WDPA_TERMS, "through": through,
-                    "through_day": through_day, "retrieved": WDPA_RETRIEVED, "first": "%04d-%02d" % START, "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                    "unit": CONTEXT_UNIT, "overlap_note": CONTEXT_OVERLAP_NOTE},
-           "areas": out_areas, "zones": zones}
+    if layer == "indigenous":
+        zones = {z: _compact_series(zs) for z, zs in zones.items()}
+    head = lay["meta"]()
+    base = {"through": through, "through_day": through_day, "retrieved": lay["retrieved"], "first": "%04d-%02d" % START,
+            "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "unit": CONTEXT_UNIT, "overlap_note": CONTEXT_OVERLAP_NOTE}
+    doc = {"meta": {**head, **base}, "areas": out_areas, "zones": zones}
     os.makedirs(args.out, exist_ok=True)
-    out = os.path.join(args.out, "context.json")
+    out = os.path.join(args.out, lay["file"])
     with open(out + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
         json.dump(doc, fh, separators=(",", ":"), ensure_ascii=False)
     atomic_replace([out + ".tmp"])
-    log(f"context.json: {len(out_areas)} areas, {len(zones)} zones, through {through}, {os.path.getsize(out):,} bytes")
+    log(f"{lay['file']}: {len(out_areas)} areas, {len(zones)} zones, through {through}, {os.path.getsize(out):,} bytes")
 
 
 def parse_args(argv=None):
@@ -1943,6 +2090,11 @@ def parse_args(argv=None):
     sn = sp.add_parser("build-season"); sn.add_argument("--data", default="data/raw"); sn.add_argument("--out", default="data/app")
     cx = sp.add_parser("build-context"); cx.add_argument("--wdpa", default="data/raw/ext/derived/protected_areas.geojson")
     cx.add_argument("--data", default="data/raw"); cx.add_argument("--out", default="data/app")
+    cx.add_argument("--layer", choices=["protected", "indigenous"], default="protected",
+                    help="protected: WDPA areas -> context.json; indigenous: LandMark territories (extract-landmark first) -> indigenous.json")
+    cx.add_argument("--input", help="polygons GeoJSON (default: --wdpa for protected, data/raw/ext/derived/indigenous_<ISO3>.geojson)")
+    el = sp.add_parser("extract-landmark", help="one country's LandMark territories to a private lon/lat GeoJSON")
+    el.add_argument("--landmark", default=LANDMARK_SHP); el.add_argument("--out", help="default data/raw/ext/derived/indigenous_<ISO3>.geojson")
     r = sp.add_parser("build-regions"); r.add_argument("--out", default="data/app"); r.add_argument("--ext", default="data/ext")
     r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/<iso3>_adm1.geojson exists")
     bb = sp.add_parser("build-biomes", help="rasterize the prepared RESOLVE biomes GeoJSON into data/ext/biomes_latam.npz")
@@ -1960,7 +2112,7 @@ def main():
     a = parse_args()
     {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current,
      "build-regions": cmd_build_regions, "build-season": cmd_build_season, "build-frp": cmd_build_frp,
-     "build-context": cmd_build_context, "build-biomes": cmd_build_biomes}[a.cmd](a)
+     "build-context": cmd_build_context, "build-biomes": cmd_build_biomes, "extract-landmark": cmd_extract_landmark}[a.cmd](a)
 
 
 if __name__ == "__main__":

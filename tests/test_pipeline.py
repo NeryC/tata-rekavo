@@ -916,3 +916,194 @@ def test_agreement_stat_without_enough_or_varying_months_has_no_statistic():
     flat = firms_pipeline.agreement_stat(pd.Series([1.0, 1.0, 1.0]), pd.Series([0.9, 1.0, 1.1]), classes)   # constant: Spearman is NaN
     assert flat == {"spearman": None, "same_class_pct": None, "n": 3}
     json.dumps(flat, allow_nan=False)
+
+
+# ----------------------------------------------------------------------------- indigenous territories (LandMark): extract-landmark + build-context --layer indigenous
+def _mercator(lon, lat):
+    r = 6378137.0
+    return r * np.radians(lon), r * np.log(np.tan(np.pi / 4 + np.radians(lat) / 2))
+
+
+def test_web_mercator_to_lonlat_known_points():
+    lon, lat = firms_pipeline.web_mercator_to_lonlat(0.0, 0.0)
+    assert (float(lon), float(lat)) == (0.0, 0.0)
+    lon, lat = firms_pipeline.web_mercator_to_lonlat(-6679169.45, -2632018.6)
+    assert float(lon) == pytest.approx(-60.0, abs=1e-6)
+    assert float(lat) == pytest.approx(-23.0, abs=1e-5)
+    # arrays, both hemispheres, and the round trip of the forward formula
+    x, y = _mercator(np.array([-69.5, -54.3, 12.0]), np.array([-22.9, 5.0, 60.0]))
+    lon, lat = firms_pipeline.web_mercator_to_lonlat(x, y)
+    assert lon == pytest.approx([-69.5, -54.3, 12.0], abs=1e-9) and lat == pytest.approx([-22.9, 5.0, 60.0], abs=1e-9)
+
+
+def test_landmark_keep_filters_country_download_and_layer():
+    ok = {"iso_code": "PRY", "download": "Yes", "layer": "Indigenous Lands"}
+    keep = firms_pipeline.landmark_keep
+    assert keep(ok, "PRY") and keep(ok, "pry")
+    assert keep({**ok, "layer": "Community Lands"}, "PRY")
+    assert not keep(ok, "BOL")
+    assert not keep({**ok, "download": "No"}, "PRY") and not keep({**ok, "download": ""}, "PRY")
+    assert not keep({**ok, "layer": "Protected Areas"}, "PRY") and not keep({**ok, "layer": ""}, "PRY")
+    assert not keep({}, "PRY")
+
+
+def _write_landmark(path, encoding="utf-8"):
+    """A tiny LandMark-like Web Mercator polygon shapefile: PRY x2 (one with a hole, one not downloadable), a PRY layer to skip, one BOL."""
+    import shapefile
+    w = shapefile.Writer(str(path), shapeType=shapefile.POLYGON, encoding=encoding)
+    for f in ["identity", "name", "category", "ethncty_1", "data_ctrb", "data_src", "layer", "download", "iso_code", "landmark_i"]:
+        w.field(f, "C", 120)
+
+    def ring(w_, s, e, n):   # clockwise (exterior) in Web Mercator metres
+        pts = [(w_, n), (e, n), (e, s), (w_, s), (w_, n)]
+        return [list(_mercator(lon, lat)) for lon, lat in pts]
+
+    def hole(w_, s, e, n):   # counter-clockwise
+        return ring(w_, s, e, n)[::-1]
+
+    rows = [
+        ("Indigenous", "Ñandú Pytã", "Tierra Indígena", "Mbya, Guarani", "FAPI", "DGEEC", "Indigenous Lands", "Yes", "PRY", "PRY1", [ring(-60, -23, -59, -22), hole(-59.7, -22.7, -59.3, -22.3)]),
+        ("Indigenous", "Sin descarga", "Tierra Indígena", "", "FAPI", "INDI", "Indigenous Lands", "No", "PRY", "PRY2", [ring(-58, -23, -57, -22)]),
+        ("Community", "Otra capa", "x", "", "FAPI", "INDI", "Protected Areas", "Yes", "PRY", "PRY3", [ring(-58, -21, -57, -20)]),
+        ("Indigenous", "Boliviana", "TCO", "", "Publicly available", "INRA", "Indigenous Lands", "Yes", "BOL", "BOL1", [ring(-64, -17, -63, -16)]),
+    ]
+    for *attrs, rings in rows:
+        w.poly(rings)
+        w.record(*attrs)
+    w.close()
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "latin-1"])
+def test_landmark_features_filters_converts_and_keeps_accents(tmp_path, encoding):
+    shp = tmp_path / "lm.shp"
+    _write_landmark(shp, encoding)
+    feats = firms_pipeline.landmark_features(str(shp), "PRY")
+    assert len(feats) == 1
+    f = feats[0]
+    # the DBF fields the statistics need, accents intact whichever way the strings were encoded
+    assert f["properties"] == {"id": "PRY1", "name": "Ñandú Pytã", "identity": "Indigenous", "category": "Tierra Indígena",
+                               "ethnicity": "Mbya, Guarani", "data_src": "DGEEC", "data_ctrb": "FAPI"}
+    g = f["geometry"]
+    assert g["type"] == "Polygon" and len(g["coordinates"]) == 2          # exterior + hole kept
+    ext = np.array(g["coordinates"][0])
+    assert ext[:, 0].min() == pytest.approx(-60.0, abs=1e-4) and ext[:, 0].max() == pytest.approx(-59.0, abs=1e-4)
+    assert ext[:, 1].min() == pytest.approx(-23.0, abs=1e-4) and ext[:, 1].max() == pytest.approx(-22.0, abs=1e-4)
+    # the converted polygon holds a point inside it and not one in its hole
+    inside = firms_pipeline._geom_contains(g, [-59.9, -59.5], [-22.9, -22.5])
+    assert list(inside) == [True, False]
+    assert [x["properties"]["id"] for x in firms_pipeline.landmark_features(str(shp), "BOL")] == ["BOL1"]
+    assert firms_pipeline.landmark_features(str(shp), "ECU") == []
+
+
+def test_extract_landmark_writes_the_private_geojson_and_needs_the_download(tmp_path, monkeypatch):
+    shp = tmp_path / "lm.shp"
+    _write_landmark(shp)
+    out = tmp_path / "derived" / "indigenous_PRY.geojson"
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "extract-landmark", "--landmark", str(shp), "--out", str(out), "--country", "pry"])
+    firms_pipeline.cmd_extract_landmark(firms_pipeline.parse_args())
+    gj = json.loads(out.read_text(encoding="utf-8"))
+    assert gj["type"] == "FeatureCollection" and [f["properties"]["id"] for f in gj["features"]] == ["PRY1"]
+    # no territory of the country in the file: a clear exit, not an empty output
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "extract-landmark", "--landmark", str(shp), "--out", str(tmp_path / "x.geojson"), "--country", "ECU"])
+    with pytest.raises(SystemExit):
+        firms_pipeline.cmd_extract_landmark(firms_pipeline.parse_args())
+    assert not (tmp_path / "x.geojson").exists()
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "extract-landmark", "--landmark", str(tmp_path / "none.shp")])
+    with pytest.raises(SystemExit) as e:
+        firms_pipeline.cmd_extract_landmark(firms_pipeline.parse_args())
+    assert "landmarkmap.org" in str(e.value)
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "extract-landmark"])
+    d = firms_pipeline.parse_args()
+    assert d.landmark == firms_pipeline.LANDMARK_SHP and d.out is None and d.country == "PRY"
+
+
+def test_build_context_layer_option_defaults_to_protected_and_needs_the_extracted_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "build-context"])
+    d = firms_pipeline.parse_args()
+    assert d.layer == "protected" and d.input is None
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "build-context", "--layer", "indigenous", "--country", "bol",
+                                                     "--data", str(tmp_path), "--out", str(tmp_path), "--input", str(tmp_path / "nope.geojson")])
+    args = firms_pipeline.parse_args()
+    assert args.layer == "indigenous"
+    with pytest.raises(SystemExit) as e:
+        firms_pipeline.cmd_build_context(args)
+    assert "extract-landmark" in str(e.value) and "indigenous.json" in str(e.value)
+    # the default input is the private per-country file
+    args.input = None
+    lay = firms_pipeline._context_layer("indigenous", args)
+    assert lay["input"].replace("\\", "/") == "data/raw/ext/derived/indigenous_BOL.geojson" and lay["file"] == "indigenous.json"
+    assert firms_pipeline._context_layer("protected", d)["file"] == "context.json"
+
+
+def _terr(**props):
+    return {"id": props.get("id", "T1"), "props": props}
+
+
+def test_indigenous_record_omits_empty_ethnicity_and_repeated_zone_series():
+    s = {"m": [3, 5], "n": [2.0, 1.5], "frp": [10.0, 7.25], "departments": ["d1", "d2", "d3"], "regions": ["r1"],
+         "by_zone": {"r1": {"m": [3, 5], "n": [2.0, 1.5], "frp": [10.0, 7.25]}, "d1": {"m": [3, 5], "n": [2.0, 1.5], "frp": [10.0, 7.25]},
+                     "d2": {"m": [5], "n": [0.5], "frp": [1.0]}}}
+    a = _terr(id="PER9", name="Comunidad X", identity="Indigenous", category="Comunidad Nativa", ethnicity="")
+    rec = firms_pipeline._indigenous_record(a, s)
+    assert "ethnicity" not in rec
+    assert list(rec)[:4] == ["id", "name", "identity", "category"]
+    assert rec["n"] == [2, 1.5] and isinstance(rec["n"][0], int) and rec["frp"] == [10, 7.25]     # whole numbers written as integers
+    # d1 and r1 hold the whole series (default); d2 differs; d3 is listed but empty there: explicit empty series
+    assert rec["by_zone"] == {"d2": {"m": [5], "n": [0.5], "frp": [1]}, "d3": {"m": [], "n": [], "frp": []}}
+    withe = firms_pipeline._indigenous_record(_terr(id="B", name="B", identity="Indigenous", category="c", ethnicity="Aguaruna"), s)
+    assert withe["ethnicity"] == "Aguaruna"
+    # a territory without any fire: nothing to repeat
+    none = firms_pipeline._indigenous_record(a, {"m": [], "n": [], "frp": [], "departments": ["d1"], "regions": [], "by_zone": {}})
+    assert none["by_zone"] == {} and none["m"] == []
+
+
+def test_indigenous_contributors_are_distinct_sorted_and_skip_the_generic_label():
+    areas = [_terr(data_ctrb="FAPI", data_src="DGEEC"), _terr(data_ctrb="FAPI", data_src="INDI"), _terr(data_ctrb="Publicly available", data_src="INDI"),
+             _terr(data_ctrb="", data_src="fapi")]
+    assert firms_pipeline._indigenous_contributors(areas) == ["FAPI", "DGEEC", "INDI"]
+
+
+def test_indigenous_statistics_carry_no_coordinates_and_count_each_hotspot_once_in_the_zones():
+    areas = [{"id": "T1", "geometry": _poly(0, 0, 2, 2)}, {"id": "T2", "geometry": _poly(1, 1, 3, 3)}]
+    h = _hot([(1.5, 1.5, 1, 1.0, 5.0, "bosque", "d1"), (0.5, 0.5, 2, 2.0, 6.0, "bosque", "d1")])
+    st = firms_pipeline.context_stats(h, areas, "peru")
+    recs = [firms_pipeline._indigenous_record({"id": a["id"], "props": {"name": a["id"], "identity": "Indigenous", "category": "c"}}, st["areas"][a["id"]]) for a in areas]
+    assert recs[0]["m"] == [1, 2] and recs[1]["m"] == [1]
+    doc = json.loads(json.dumps({"areas": recs, "zones": {z: firms_pipeline._compact_series(s) for z, s in st["zones"].items()}}))
+    _walk(doc)
+    assert st["zones"]["peru"]["n"] == [1.0, 2.0]          # union: the hotspot inside both territories counts once
+
+
+def _indigenous_files():
+    out = [(ROOT / "data" / "app" / "indigenous.json", "PRY")]
+    out += [(ROOT / "data" / "app" / c / "indigenous.json", c) for c in ("BOL", "ECU", "PER")]
+    return [(p, c) for p, c in out if p.exists()]
+
+
+@pytest.mark.parametrize("path,iso3", _indigenous_files() or [pytest.param(None, None, marks=pytest.mark.skip(reason="no data/app/*/indigenous.json"))])
+def test_indigenous_real_data(path, iso3):
+    # PER ships 2,530 territories: its file is the one that does not fit under 1 MB
+    assert path.stat().st_size < (1_300_000 if iso3 == "PER" else 1_000_000)
+    text = path.read_text(encoding="utf-8")
+    assert "�" not in text and "Ã" not in text and "Â" not in text     # no bad decode left in any field
+    doc = json.loads(text)
+    _walk(doc)                                                                          # statistics only: no geometry, bbox, centroid
+    meta = doc["meta"]
+    assert meta["license"] == "CC BY-SA 4.0" and meta["retrieved"] == "2026-11-15" and meta["layer"] == "indigenous"
+    assert "https://landmarkmap.org" in meta["citation"] and "v202606" in meta["citation"] and "no LandMark geometry" in meta["terms"]
+    assert meta["contributors"] and all(isinstance(c, str) and c for c in meta["contributors"]) and len(set(meta["contributors"])) == len(meta["contributors"])
+    assert meta["through"] >= "2026-01" and len(meta["through_day"]) == 10 and meta["by_zone_default"] == "whole"
+    counts = {"PRY": 678, "BOL": 321, "PER": 2530, "ECU": 754}
+    assert len(doc["areas"]) == counts[iso3]
+    assert len({a["id"] for a in doc["areas"]}) == len(doc["areas"]) and all(a["id"].startswith(iso3) for a in doc["areas"])
+    country = next(iter(doc["zones"]))
+    zones = set(doc["zones"])
+    for a in doc["areas"]:
+        assert set(a) >= {"id", "name", "identity", "category", "departments", "regions", "m", "n", "frp", "by_zone"}
+        assert a.get("ethnicity") != ""                                                  # omitted, never empty
+        assert len(a["m"]) == len(a["n"]) == len(a["frp"]) and a["m"] == sorted(set(a["m"]))
+        assert set(a["by_zone"]) <= set(a["departments"]) | set(a["regions"]) and set(a["departments"]) | set(a["regions"]) <= zones
+    # an area's fire never exceeds the country's union for the same month
+    tot = dict(zip(doc["zones"][country]["m"], doc["zones"][country]["n"]))
+    for a in doc["areas"]:
+        assert all(n <= tot.get(m, 0) + 0.11 for m, n in zip(a["m"], a["n"]))
