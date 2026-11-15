@@ -7,6 +7,7 @@ import ValidationPanel from "./ValidationPanel";
 import DepartmentRanking from "./DepartmentRanking";
 import ProtectedAreas from "./ProtectedAreas";
 import Glance, { type CaseLink } from "./Glance";
+import WeatherPanel from "./WeatherPanel";
 import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
 import { layerNote, shareLabel, topRows } from "./layerFigures";
@@ -212,6 +213,18 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   }, [countGrid, zoneKind, department, polygon, regionOf, regions]);
   const zoneSet = useMemo(() => new Set(zoneCells), [zoneCells]);
   const zoneBBox = useMemo(() => (department ? department.bbox : countGrid && zoneCells.length ? bboxOfCells(countGrid.meta, zoneCells) : country.bbox), [countGrid, zoneCells, department, country.bbox]);
+  const weatherPoint = useMemo<[number, number] | null>(() => {
+    if (!countGrid || !zoneCells.length) return null;
+    if (zoneKind === "custom" && coords) return [coords.lon, coords.lat];
+    const midLon = (zoneBBox[0] + zoneBBox[2]) / 2, midLat = (zoneBBox[1] + zoneBBox[3]) / 2;
+    let best: [number, number] | null = null, distance = Infinity;
+    for (const id of zoneCells) {
+      const [lon, lat] = H.cellCenter(countGrid.meta, id);
+      const d = (lon - midLon) ** 2 * Math.cos(midLat * Math.PI / 180) ** 2 + (lat - midLat) ** 2;
+      if (d < distance) { best = [lon, lat]; distance = d; }
+    }
+    return best;
+  }, [countGrid, zoneCells, zoneBBox, zoneKind, coords]);
   // what the map outlines: the department boundary or the hand-made polygon
   const outline = useMemo<GeoJSON.Geometry | null>(() => (department ? department.geometry
     : zoneKind === "custom" && polygon ? { type: "LineString", coordinates: polygon } : null), [department, zoneKind, polygon]);
@@ -608,6 +621,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               {small && zoneCells.length > 0 && <p className="warn">{t.smallArea}</p>}
             </section>
 
+            <WeatherPanel point={weatherPoint} />
             <section className="sec-month">
               <h2>{t.step2}</h2>
               <div className="month-row">
@@ -849,3 +863,4 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     </I18nContext.Provider>
   );
 }
+

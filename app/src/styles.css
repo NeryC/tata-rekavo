@@ -159,6 +159,13 @@ details p { margin-top: 6px; color: var(--ink-2); max-width: 62ch; }
 
 /* ---------- calendar ---------- */
 .calendar { position: relative; }
+.weather-section summary { cursor: pointer; }
+.weather-section summary h2 { display: inline; }
+.weather-location { font-weight: 600; margin: 8px 0 4px; }
+.weather-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 12px 0; }
+.weather-values div { border-top: 1px solid var(--edge); padding-top: 6px; }
+.weather-values dt { font-size: 13px; color: var(--ink-2); }
+.weather-values dd { margin: 2px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cal-instructions { font-size: 13px; color: var(--ink-2); margin-bottom: 8px; }
 .cal-scroll { overflow-x: auto; }
 .cal-grid { display: flex; flex-direction: column; gap: 2px; }
@@ -275,6 +282,7 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
   .panel > .sec-area { order: 1; }
   .panel > .sec-month { order: 2; border-bottom: 0; }
   .panel > section.verdict { order: 3; margin: 0 16px 16px; }
+  .panel > .weather-section { order: 4; }
   .map-wrap { order: 4; height: 70vh; min-height: 380px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
 
   .coords { grid-template-columns: 1fr 1fr; }
