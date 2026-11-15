@@ -1221,9 +1221,11 @@ WDPA_CITATION = ("UNEP-WCMC and IUCN (2026), Protected Planet: The World Databas
 WDPA_TERMS = "Only fire statistics per protected area are published; no WDPA geometry or derived spatial data"
 CONTEXT_UNIT = ("n = VIIRS S-NPP-equivalent hotspots per month (2002-07..2025-12 harmonized archive; 2026 observed VIIRS, weight 1); "
                 "frp = sum of harmonized Fire Radiative Power in MW per month (2026 observed); m = month index as in grid.json")
+WDPA_RETRIEVED = "2026-11-14"   # date the WDPA / WD-OECM November 2026 release was downloaded from protectedplanet.net
 CONTEXT_OVERLAP_NOTE = ("departments / regions of an area = those with at least one 0.1-degree grid-cell centre inside the area "
                         "or at least one hotspot inside the area; hotspots count in every area that contains them, zones count the "
-                        "union of areas (each hotspot once)")
+                        "union of areas (each hotspot once); by_zone = the area's own series restricted to one department or region "
+                        "(hotspots inside the area AND inside that zone; only zones where it is not empty)")
 
 
 def _fix_mojibake(text):
@@ -1273,7 +1275,7 @@ def context_stats(h, areas, country_id, centres=None):
     h: hotspot frame [latitude, longitude, m, n, frp, region, dept] (n / frp = harmonized weights; dept may be None).
     areas: [{"id": str, "geometry": GeoJSON Polygon|MultiPolygon}].
     centres: optional grid-cell centres {"lon", "lat", "dept", "region"} (parallel arrays) used for the overlap lists.
-    Returns {"areas": {id: {m, n, frp, departments, regions}}, "zones": {zone: {m, n, frp}}}; the zones (country, each
+    Returns {"areas": {id: {m, n, frp, departments, regions, by_zone}}, "zones": {zone: {m, n, frp}}}; the zones (country, each
     region, each department) total the UNION of the areas, i.e. every hotspot once however many areas contain it."""
     lon, lat = h.longitude.to_numpy(dtype=float), h.latitude.to_numpy(dtype=float)
     m_all, n_all, f_all = h.m.to_numpy(), h.n.to_numpy(dtype=float), h.frp.to_numpy(dtype=float)
@@ -1289,7 +1291,14 @@ def context_stats(h, areas, country_id, centres=None):
             c_in = _geom_contains(a["geometry"], centres["lon"], centres["lat"])
             deps |= {str(d) for d in np.asarray(centres["dept"], dtype=object)[c_in] if d is not None and d == d}
             regs |= {str(r) for r in np.asarray(centres["region"], dtype=object)[c_in] if r is not None and r == r}
-        res[a["id"]] = {**s, "departments": sorted(deps), "regions": sorted(regs)}
+        by_zone = {}
+        hi = h[inside]
+        for col in ("region", "dept"):
+            for z, g in hi.groupby(col):
+                zs = _month_series(g.m, g.n, g.frp)
+                if zs["m"]:
+                    by_zone[str(z)] = zs
+        res[a["id"]] = {**s, "departments": sorted(deps), "regions": sorted(regs), "by_zone": by_zone}
     u = h[in_any]
     zones = {country_id: _month_series(u.m, u.n, u.frp)}
     for col in ("region", "dept"):
@@ -1301,7 +1310,8 @@ def context_stats(h, areas, country_id, centres=None):
 def _harmonized_hotspots(cfg, data_dir, current_csv):
     """Every vegetation-fire hotspot with its harmonized count weight `n` and harmonized FRP weight `frp`, from the archives
     (same loader, outage rules and factors as build / build-frp), plus the observed 2026 months of current_hotspots.csv
-    (weight 1, FRP as observed). Returns (frame[latitude, longitude, m, n, frp, region], last month "YYYY-MM")."""
+    (weight 1, FRP as observed). Returns (frame[latitude, longitude, m, n, frp, region], last month "YYYY-MM",
+    last day "YYYY-MM-DD": the latest hotspot date of current_hotspots.csv, or the end of the last archive month)."""
     a = load_archives(data_dir, cfg.firms_name)
     v = vegetation(a).copy()
     v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
@@ -1314,6 +1324,9 @@ def _harmonized_hotspots(cfg, data_dir, current_csv):
     last_archive = int(v.m.max())
     v = v[(v.m >= 0) & ((v.n > 0) | (v.frp > 0))][["latitude", "longitude", "m", "n", "frp", "region"]]
     through = "%04d-%02d" % index_to_ym(last_archive)
+    ly, lm = index_to_ym(last_archive)
+    through_day = dt.date(ly + (lm == 12), lm % 12 + 1, 1).isoformat()
+    through_day = (dt.date.fromisoformat(through_day) - dt.timedelta(days=1)).isoformat()
     if os.path.exists(current_csv):
         c = pd.read_csv(current_csv, dtype={"acq_time": str, "confidence": str, "version": str, "satellite": str})
         if "type" in c.columns:
@@ -1328,9 +1341,10 @@ def _harmonized_hotspots(cfg, data_dir, current_csv):
             cur["region"] = region_of(cur.latitude.values, cur.longitude.values, cfg)
             v = pd.concat([v, cur], ignore_index=True)
             through = "%04d-%02d" % index_to_ym(int(cur.m.max()))
+            through_day = d.max().date().isoformat()
     else:
         log(f"{current_csv} missing: statistics end with the archive ({through})")
-    return v.reset_index(drop=True), through
+    return v.reset_index(drop=True), through, through_day
 
 
 def cmd_build_context(args):
@@ -1348,7 +1362,7 @@ def cmd_build_context(args):
             cell_dept = {int(cl): d["id"] for d in json.load(fh)["departments"] for cl in d["cells"]}
     else:
         log("departments.json missing: no department zones or overlaps")
-    h, through = _harmonized_hotspots(cfg, args.data, os.path.join(args.out, "current_hotspots.csv"))
+    h, through, through_day = _harmonized_hotspots(cfg, args.data, os.path.join(args.out, "current_hotspots.csv"))
     g = cfg.grid
     r, c, ok = cell_of(h.latitude.values, h.longitude.values, g)
     cell = np.where(ok, g.index(r, c), -1)
@@ -1363,13 +1377,14 @@ def cmd_build_context(args):
     out_areas = []
     for a in areas:
         p, s = a["props"], stats["areas"][a["id"]]
-        out_areas.append({"id": a["id"], "name": _fix_mojibake(p.get("NAME")), "desig": p.get("DESIG_ENG"), "desig_type": p.get("DESIG_TYPE"),
-                          "iucn": p.get("IUCN_CAT"), "departments": s["departments"], "regions": s["regions"],
-                          "m": s["m"], "n": s["n"], "frp": s["frp"]})
+        out_areas.append({"id": a["id"], "name": _fix_mojibake(p.get("NAME")), "desig": _fix_mojibake(p.get("DESIG_ENG")),
+                          "desig_type": _fix_mojibake(p.get("DESIG_TYPE")), "iucn": _fix_mojibake(p.get("IUCN_CAT")),
+                          "departments": s["departments"], "regions": s["regions"],
+                          "m": s["m"], "n": s["n"], "frp": s["frp"], "by_zone": s["by_zone"]})
     order = [cfg.area] + cfg.region_names + sorted(set(cell_dept.values()))
     zones = {z: stats["zones"].get(z, {"m": [], "n": [], "frp": []}) for z in order}
     doc = {"meta": {"source": WDPA_SOURCE, "citation": WDPA_CITATION, "terms": WDPA_TERMS, "through": through,
-                    "first": "%04d-%02d" % START, "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                    "through_day": through_day, "retrieved": WDPA_RETRIEVED, "first": "%04d-%02d" % START, "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                     "unit": CONTEXT_UNIT, "overlap_note": CONTEXT_OVERLAP_NOTE},
            "areas": out_areas, "zones": zones}
     os.makedirs(args.out, exist_ok=True)

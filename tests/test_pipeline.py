@@ -609,6 +609,22 @@ def test_context_hotspot_in_two_overlapping_areas_counts_in_both_but_once_in_zon
     assert out["zones"]["d1"]["n"] == [3.0] and out["zones"]["d2"]["n"] == [4.0] and out["zones"]["d2"]["m"] == [11]
 
 
+def test_context_by_zone_is_the_area_series_inside_each_department_and_region():
+    areas = [{"id": "A", "geometry": _poly(0, 0, 4, 4)}]
+    h = _hot([(1.0, 1.0, 10, 2.0, 5.0, "chaco", "d1"),
+              (2.0, 1.0, 10, 3.0, 4.0, "chaco", "d2"),
+              (3.0, 3.0, 11, 1.0, 1.0, "oriental", "d2"),
+              (9.0, 9.0, 10, 9.0, 9.0, "chaco", "d1")])      # outside the area: in no series
+    a = firms_pipeline.context_stats(h, areas, "paraguay")["areas"]["A"]
+    bz = a["by_zone"]
+    assert set(bz) == {"chaco", "oriental", "d1", "d2"}
+    assert (bz["d1"]["m"], bz["d1"]["n"], bz["d1"]["frp"]) == ([10], [2.0], [5.0])
+    assert (bz["d2"]["m"], bz["d2"]["n"]) == ([10, 11], [3.0, 1.0])
+    assert (bz["chaco"]["m"], bz["chaco"]["n"]) == ([10], [5.0]) and bz["oriental"]["n"] == [1.0]
+    assert (a["m"], a["n"]) == ([10, 11], [5.0, 1.0])           # the whole series is unchanged
+    assert "paraguay" not in bz
+
+
 def test_context_hotspot_outside_adds_nothing():
     out = firms_pipeline.context_stats(_hot([(9.0, 9.0, 3, 1.0, 1.0, "chaco", "d1")]), [{"id": "A", "geometry": _poly(0, 0, 1, 1)}], "paraguay")
     assert out["areas"]["A"]["m"] == [] and out["areas"]["A"]["n"] == [] and out["areas"]["A"]["frp"] == []
@@ -692,11 +708,14 @@ def test_context_real_data():
     text = cj.read_text(encoding="utf-8")
     assert "\ufffd" not in text          # no replacement characters from a bad decode
     assert "\u00d1uguazu" in text        # accents survive (the source had UTF-8 read as latin-1)
+    assert "\u00c3" not in text and "\u00c2" not in text   # no mojibake left in any field (name, desig, desig_type, iucn)
     ctx = json.loads(text)
     _walk(ctx)
     meta = ctx["meta"]
     assert meta["source"].startswith("WDPA/WD-OECM") and "no WDPA geometry" in meta["terms"]
     assert meta["through"] >= "2026-01" and "UNEP-WCMC" in meta["citation"]
+    assert len(meta["through_day"]) == 10 and meta["through_day"][:7] == meta["through"]
+    assert meta["retrieved"] == "2026-11-14"
     names = {a["name"]: a for a in ctx["areas"]}
     assert "Defensores del Chaco" in names
     assert "chaco" in names["Defensores del Chaco"]["regions"]
@@ -715,6 +734,15 @@ def test_context_real_data():
     assert 0.01 < share < 0.60
     for a in ctx["areas"]:   # no area exceeds the union
         assert sum(a["n"]) <= sum(first["n"]) + 1
+    # by_zone: the area series inside one department / region; never more than the area, nor than that zone's union, per month
+    for a in ctx["areas"]:
+        assert isinstance(a["by_zone"], dict) and "paraguay" not in a["by_zone"]
+        whole = dict(zip(a["m"], a["n"]))
+        for z, s in a["by_zone"].items():
+            assert z in ctx["zones"] and len(s["m"]) == len(s["n"]) == len(s["frp"])
+            zone = dict(zip(ctx["zones"][z]["m"], ctx["zones"][z]["n"]))
+            for m, n in zip(s["m"], s["n"]):
+                assert n <= whole.get(m, 0) + 0.11 and n <= zone.get(m, 0) + 0.11
 
 
 def test_fix_mojibake_repairs_utf8_read_as_latin1_and_keeps_clean_text():
