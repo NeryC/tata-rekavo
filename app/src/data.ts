@@ -1,6 +1,7 @@
 import * as H from "@core";
 import type { ContextFile, CurrentMeta, DepartmentDef, Grid, GridMeta } from "@core";
 import { validateContext } from "./contextCheck";
+import { biomePresets } from "./regions";
 import type { I18n } from "./i18n";
 import type { SeasonFile } from "./season";
 
@@ -95,10 +96,7 @@ export function regionPresets(meta: GridMeta, cellIds: Iterable<number>, regionC
     return { ids: ["chaco", "oriental"], of };
   }
   if (!regionCells) return { ids: [], of };
-  const order = Array.isArray(r?.names) ? r.names : regionCells.regions.map((x) => x.id);
-  const ids = order.filter((id) => regionCells.regions.some((x) => x.id === id));
-  for (const reg of regionCells.regions) if (ids.includes(reg.id)) for (const c of reg.cells) of.set(c, reg.id);
-  return { ids, of };
+  return biomePresets(Array.isArray(r?.names) ? r.names : undefined, regionCells);
 }
 
 function b64ToBytes(b64: string) {
