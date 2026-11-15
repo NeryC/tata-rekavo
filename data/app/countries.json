@@ -44,6 +44,27 @@
    ]
   },
   {
+   "iso3": "PER",
+   "path": "PER/",
+   "area": "peru",
+   "name": {
+    "en": "Peru",
+    "es": "Perú"
+   },
+   "bbox": [
+    -81.4,
+    -18.4,
+    -68.6,
+    0
+   ],
+   "tz": "America/Lima",
+   "tzCity": "Lima",
+   "example": [
+    -9,
+    -74.5
+   ]
+  },
+  {
    "iso3": "URY",
    "path": "URY/",
    "area": "uruguay",

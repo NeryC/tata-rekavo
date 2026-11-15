@@ -11,6 +11,7 @@ export const DEFAULT_ISO3 = "PRY";
 const EXTRA = {
   PRY: { tz: "America/Asuncion", tzCity: "Asunción", example: [-22.35, -60.03] },
   BOL: { tz: "America/La_Paz", tzCity: "La Paz", example: [-16.37, -60.96] },
+  PER: { nameEs: "Perú", tz: "America/Lima", tzCity: "Lima", example: [-9.0, -74.5] },
   URY: { tz: "America/Montevideo", tzCity: "Montevideo", example: [-31.7, -55.98] },
 };
 

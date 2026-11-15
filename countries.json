@@ -92,5 +92,37 @@
       },
       "note": "Simplified department boundaries (geoBoundaries gbOpen URY ADM1). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
     }
+  },
+  "PER": {
+    "name": "Peru",
+    "firms_name": "Peru",
+    "area": "peru",
+    "bbox": [-81.4, -18.4, -68.6, 0.0],
+    "deg": 0.25,
+    "lat0": -18.5,
+    "lon0": -81.5,
+    "rows": 74,
+    "cols": 52,
+    "regions": {
+      "kind": "biome",
+      "source": "data/ext/biomes_latam.npz",
+      "min_hotspots": 500,
+      "names": ["tropical-subtropical-moist-broadleaf-forests", "tropical-subtropical-dry-broadleaf-forests",
+                "montane-grasslands-shrublands", "deserts-xeric-shrublands"]
+    },
+    "export_hotspots": false,
+    "burn_history": false,
+    "mask": {"deg": 0.05, "rows": 370, "cols": 260},
+    "departments": {
+      "merge": {"el-callao": "lima", "municipalidad-metropolitana-de-lima": "lima"},
+      "names": {
+        "amazonas": "Amazonas", "ancash": "Áncash", "apurimac": "Apurímac", "arequipa": "Arequipa", "ayacucho": "Ayacucho",
+        "cajamarca": "Cajamarca", "cusco": "Cusco", "huancavelica": "Huancavelica", "huanuco": "Huánuco", "ica": "Ica",
+        "junin": "Junín", "la-libertad": "La Libertad", "lambayeque": "Lambayeque", "lima": "Lima", "loreto": "Loreto",
+        "madre-de-dios": "Madre de Dios", "moquegua": "Moquegua", "pasco": "Pasco", "piura": "Piura", "puno": "Puno",
+        "san-martin": "San Martín", "tacna": "Tacna", "tumbes": "Tumbes", "ucayali": "Ucayali"
+      },
+      "note": "Simplified department boundaries (geoBoundaries gbOpen PER ADM1). Lima is the department of Lima: the Lima region, the Metropolitan Municipality of Lima (Lima Province) and El Callao (a 146 km2 province smaller than one 0.25-degree cell) are merged into it (24 units). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
+    }
   }
 }
