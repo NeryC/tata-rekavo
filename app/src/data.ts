@@ -1,6 +1,6 @@
 import * as H from "@core";
 import type { ContextFile, CurrentMeta, DepartmentDef, Grid, GridMeta } from "@core";
-import { validateContext } from "./contextCheck";
+import { validateContext, validateIndigenous } from "./contextCheck";
 import { biomePresets } from "./regions";
 import type { I18n } from "./i18n";
 import type { SeasonFile } from "./season";
@@ -43,7 +43,7 @@ export interface CountryInfo {
   /** country median error above the 15 % gate: the selector tags it as a pilot */
   pilot?: boolean;
   /** optional files the country ships (from the index); a missing entry means "unknown: try it" */
-  files?: { burnHistory: boolean; hotspotArchive: boolean; context: boolean };
+  files?: { burnHistory: boolean; hotspotArchive: boolean; context: boolean; indigenous: boolean };
 }
 export interface CountriesIndex { default: string; countries: CountryInfo[] }
 
@@ -209,6 +209,18 @@ export function loadContext(path = ""): Promise<ContextFile | null> {
   return once(contextCache, path, () => fetch(url("context.json", path))
     .then((r) => (r.ok ? r.json() : null))
     .then(validateContext)
+    .catch(() => null));
+}
+
+const indigenousCache = new Map<string, Promise<ContextFile | null>>();
+/**
+ * indigenous.json (fire statistics per indigenous territory, LandMark, CC BY-SA 4.0; no geometry), fetched once.
+ * Resolves to null when it is missing or malformed: the indigenous-territories block is then hidden and the rest of the app is unaffected.
+ */
+export function loadIndigenous(path = ""): Promise<ContextFile | null> {
+  return once(indigenousCache, path, () => fetch(url("indigenous.json", path))
+    .then((r) => (r.ok ? r.json() : null))
+    .then(validateIndigenous)
     .catch(() => null));
 }
 
