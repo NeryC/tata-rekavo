@@ -112,8 +112,9 @@
       "names": ["tropical-subtropical-moist-broadleaf-forests", "tropical-subtropical-dry-broadleaf-forests",
                 "montane-grasslands-shrublands", "deserts-xeric-shrublands"]
     },
-    "export_hotspots": false,
-    "burn_history": false,
+    "export_hotspots": true,
+    "burn_history": true,
+    "fine": {"deg": 0.01, "rows": 1840, "cols": 1280},
     "mask": {"deg": 0.05, "rows": 370, "cols": 260},
     "departments": {
       "mask_cells": true,
