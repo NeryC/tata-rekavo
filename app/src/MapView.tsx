@@ -17,11 +17,21 @@ const FALLBACK_STYLE: maplibregl.StyleSpecification = {
 
 // sequential warm ramp for hotspot counts per cell-month (magnitude, one hue family)
 export const CELL_RAMP: [number, string][] = [[1, "#fde5c8"], [10, "#f9b36e"], [50, "#ee7a2c"], [200, "#c9461a"], [1000, "#7f1d0a"]];
+// same colours for fire power in MW per cell-month, which runs about ten times higher than the counts
+export const FRP_RAMP: [number, string][] = [[5, "#fde5c8"], [50, "#f9b36e"], [250, "#ee7a2c"], [1000, "#c9461a"], [5000, "#7f1d0a"]];
+const rampExpr = (ramp: [number, string][]) => {
+  const e: unknown[] = ["interpolate", ["linear"], ["get", "v"]];
+  ramp.forEach(([v, c]) => e.push(v, c));
+  return e as maplibregl.ExpressionSpecification;
+};
+const rampLabel = (v: number, last: boolean) => `${v >= 1000 ? `${v / 1000}k` : v}${last ? "+" : ""}`;
 
 interface Props {
   grid: Grid;
   monthLabel: string;
   values: Map<number, number>;
+  /** what the cell values mean: hotspot counts or fire power (MW); picks the colour ramp */
+  metric: "count" | "frp";
   zone: Set<number>;
   zoneBBox: [number, number, number, number];
   /** changes whenever the app asks the map to go back to the zone view */
@@ -104,12 +114,10 @@ export default function MapView(p: Props) {
         m.addSource("zone", { type: "geojson", data: empty });
         m.addSource("draft", { type: "geojson", data: empty });
         m.addSource("hotspots", { type: "geojson", data: empty });
-        const ramp: unknown[] = ["interpolate", ["linear"], ["get", "v"]];
-        CELL_RAMP.forEach(([v, c]) => ramp.push(v, c));
         m.addLayer({
           id: "cells", type: "fill", source: "cells",
           paint: {
-            "fill-color": ramp as maplibregl.ExpressionSpecification,
+            "fill-color": rampExpr(props.current.metric === "frp" ? FRP_RAMP : CELL_RAMP),
             "fill-opacity": ["case", ["<=", ["get", "v"], 0], 0, ["==", ["get", "sel"], 1], 0.85, 0.22],
           },
         });
@@ -206,6 +214,13 @@ export default function MapView(p: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [p.drawing, ready]);
 
+  // colour ramp follows the measure
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    m.setPaintProperty("cells", "fill-color", rampExpr(p.metric === "frp" ? FRP_RAMP : CELL_RAMP));
+  }, [ready, p.metric]);
+
   // grid cells for the selected month
   useEffect(() => {
     const m = map.current;
@@ -269,7 +284,7 @@ export default function MapView(p: Props) {
       <div className="map-legend">
         <div className="legend-title">{t.mapLegend(p.monthLabel)}</div>
         <div className="legend-ramp">
-          {CELL_RAMP.map(([v, c]) => (<span key={v}><i style={{ background: c }} />{v >= 1000 ? "1k+" : v}</span>))}
+          {(p.metric === "frp" ? FRP_RAMP : CELL_RAMP).map(([v, c], i, a) => (<span key={v}><i style={{ background: c }} />{rampLabel(v, i === a.length - 1)}</span>))}
         </div>
         {p.hotspots.length > 0 && !p.newOnly && <div className="legend-dots"><i /> {t.legendDots(num(p.hotspots.length))}</div>}
         {p.hotspots.length > 0 && <div className="legend-dots new"><i /> {t.legendNew(num(nNew))}</div>}

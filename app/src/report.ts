@@ -73,7 +73,7 @@ export async function downloadReport(p: ReportInput, filename: string) {
     const colors: (string | null)[] = [], dims: boolean[] = [], hatch: boolean[] = [];
     row.cells.forEach((c, i) => {
       const cov = c ? coverage(c.m) : 0;
-      if (!c || cov === 0) { colors.push(null); dims.push(false); hatch.push(false); return; }
+      if (!c || cov === 0 || c.noData) { colors.push(null); dims.push(false); hatch.push(false); return; }
       const med = cal.monthlyMedian[i] * cov;
       const ratio = med > 0 ? c.value / med : c.value > 0 ? 9 : 1;
       colors.push(mode === "ratio" ? binOf(ratio).color : scale.colorOf(c.value));

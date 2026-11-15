@@ -38,6 +38,7 @@ test("round-trip of a full state", () => {
     cal: "count",
     naive: true,
     newOnly: true,
+    metric: "frp",
   };
   assert.deepEqual(decodeState(encodeState(s)), s);
 });
@@ -130,4 +131,22 @@ test("validateCoords bounds", () => {
   assert.equal(validateCoords(-25, -57, 4.9), false);
   assert.equal(validateCoords(-25, -57, 301), false);
   assert.equal(validateCoords(NaN, -57, 25), false);
+});
+
+test("metric: frp is written as x=frp, the default count is never written", () => {
+  assert.equal(encodeState({ metric: "frp" }), "x=frp");
+  assert.equal(encodeState({ metric: "count" }), "");
+  assert.equal(encodeState({ zone: "chaco", m: "2024-09", metric: "frp" }), "z=chaco&m=2024-09&x=frp");
+});
+
+test("metric: x=frp decodes, anything else is ignored (including an explicit count)", () => {
+  assert.deepEqual(decodeState("x=frp"), { metric: "frp" });
+  assert.deepEqual(decodeState("x=count"), {});
+  assert.deepEqual(decodeState("x=FRP&z=chaco"), { zone: "chaco" });
+  assert.deepEqual(decodeState("x="), {});
+});
+
+test("metric round-trips together with area and month", () => {
+  const s: ShareState = { zone: "department", dep: "PY-11", m: "2024-09", metric: "frp" };
+  assert.deepEqual(decodeState(encodeState(s)), s);
 });

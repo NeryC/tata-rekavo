@@ -42,7 +42,7 @@ test("closeRing closes an open ring and leaves a closed one alone", () => {
 
 test("planRestore: empty state gives the defaults", () => {
   const r = planRestore(FIRST, N, {}, DEF);
-  assert.deepEqual(r, { zone: "paraguay", dep: null, coords: null, poly: null, month: 149, range: DEF, cal: "ratio", naive: false, newOnly: false });
+  assert.deepEqual(r, { zone: "paraguay", dep: null, coords: null, poly: null, month: 149, range: DEF, cal: "ratio", naive: false, newOnly: false, metric: "count" });
 });
 
 test("planRestore: bare custom falls back to Paraguay", () => {
@@ -88,4 +88,10 @@ test("planRestore: chaco, coords beat poly, poly out of bounds dropped", () => {
 test("planRestore: month, cal, flags", () => {
   const r = planRestore(FIRST, N, { m: "2012-03", cal: "count", naive: true, newOnly: true }, DEF);
   assert.deepEqual([r.month, r.cal, r.naive, r.newOnly], [2, "count", true, true]);
+});
+
+test("planRestore: x=frp restores the FRP metric and keeps area and month; default is count", () => {
+  const r = planRestore(FIRST, N, { zone: "chaco", m: "2012-03", metric: "frp" }, DEF);
+  assert.deepEqual([r.metric, r.zone, r.month], ["frp", "chaco", 2]);
+  assert.equal(planRestore(FIRST, N, { zone: "chaco" }, DEF).metric, "count");
 });

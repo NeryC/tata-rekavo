@@ -6,18 +6,21 @@ export interface RangeAnalytics {
   above: number; below: number; months: number;
   peak: { m: number; v: number };
   partial: boolean;
+  /** months in the range with no data for this metric (FRP before the daily file carried it): left out */
+  noData: number;
 }
 
 /** Totals and anomalies over a month range for a zone series. */
 export function rangeAnalytics(grid: Grid, series: Series, coverage: (m: number) => number, from: number, to: number): RangeAnalytics {
   const meta = grid.meta;
   const med = H.calendar(grid, series.harmonized).monthlyMedian;
-  const r: RangeAnalytics = { total: 0, typical: 0, ratio: 0, err: 0, above: 0, below: 0, months: 0, peak: { m: -1, v: -1 }, partial: false };
+  const r: RangeAnalytics = { total: 0, typical: 0, ratio: 0, err: 0, above: 0, below: 0, months: 0, peak: { m: -1, v: -1 }, partial: false, noData: 0 };
   let err2 = 0;
   for (let m = Math.max(0, from); m <= Math.min(to, grid.nMonths - 1); m++) {
     const cov = coverage(m);
     if (cov === 0) continue;
     const v = series.harmonized[m];
+    if (v !== v) { r.noData++; continue; } // NaN: no data, not zero
     const typ = med[H.monthOf(meta, m).month - 1] * cov;
     r.total += v; r.typical += typ; r.months++;
     err2 += (H.relativeError(meta, m, v) * v) ** 2;

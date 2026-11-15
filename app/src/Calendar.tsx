@@ -89,6 +89,14 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
               if (!c) return <span key={i} className="cal-cell empty" />;
               const cov = coverage(c.m);
               if (cov === 0) return <span key={i} className="cal-cell empty" />;
+              if (c.noData) { // a month the active measure has no data for: not zero, and still selectable
+                const label = `${i18n.monthLabel(row.year, i + 1)}, ${t.calNoData}`;
+                return (
+                  <button key={i} role="gridcell" aria-label={label} aria-selected={c.m === selected}
+                    className={`cal-cell nodata${c.m === selected ? " sel" : ""}`} onClick={() => onSelect(c.m)}
+                    onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: [i18n.monthLabel(row.year, i + 1), t.calNoData] })} />
+                );
+              }
               const med = cal.monthlyMedian[i] * cov;
               const ratio = med > 0 ? c.value / med : c.value > 0 ? 9 : 1;
               const color = mode === "ratio" ? binOf(ratio).color : scale.colorOf(c.value);
@@ -121,7 +129,7 @@ export default function Calendar({ grid, series, coverage, selected, onSelect, m
                   onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, html: lines })} />
               );
             })}
-            <span className="cal-total">{row.total >= 1000 ? `${Math.round(row.total / 1000)}k` : num(row.total)}</span>
+            <span className="cal-total">{row.cells.every((c) => !c || c.noData) ? "—" : row.total >= 1000 ? `${Math.round(row.total / 1000)}k` : num(row.total)}</span>
           </div>
         ))}
       </div>

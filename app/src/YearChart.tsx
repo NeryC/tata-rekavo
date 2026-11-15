@@ -3,20 +3,21 @@ import * as H from "@core";
 import type { Grid, Series } from "@core";
 import { useI18n } from "./i18n";
 
-interface Props { grid: Grid; series: Series; naive: boolean; selectedYear: number; lastPartial: boolean }
+interface Props { grid: Grid; series: Series; naive: boolean; selectedYear: number; lastPartial: boolean; /** axis unit, e.g. "MW"; none for hotspot counts */ unit?: string }
 
 export const C = { translated: "#6250d6", observed: "#eb6834", modisRaw: "#898781" };
 
-export interface YearTotal { year: number; h: number; n: number; translated: boolean; err: number }
+export interface YearTotal { year: number; h: number; n: number; translated: boolean; err: number; /** months with no data, left out of the totals */ noData: number }
 /** Yearly harmonized and naive totals, with the error band of translated years. */
 export function yearTotals(grid: Grid, series: Series): YearTotal[] {
   const meta = grid.meta, em = meta.error_model;
-  const out = new Map<number, { h: number; n: number; rnd2: number; sys: number; preMonths: number; months: number }>();
+  const out = new Map<number, { h: number; n: number; rnd2: number; sys: number; preMonths: number; months: number; noData: number }>();
   for (let m = 0; m < grid.nMonths; m++) {
     const { year } = H.monthOf(meta, m);
-    const o = out.get(year) ?? { h: 0, n: 0, rnd2: 0, sys: 0, preMonths: 0, months: 0 };
+    const o = out.get(year) ?? { h: 0, n: 0, rnd2: 0, sys: 0, preMonths: 0, months: 0, noData: 0 };
     o.months++;
     const v = series.harmonized[m];
+    if (v !== v) { o.noData++; out.set(year, o); continue; } // NaN: no data, not zero
     o.h += v; o.n += series.naive[m];
     if (m < meta.months.viirs_start_index) {
       const rnd = Math.min(1, em.c * Math.pow(Math.max(v, 1), -em.p));
@@ -26,11 +27,11 @@ export function yearTotals(grid: Grid, series: Series): YearTotal[] {
   }
   return [...out.entries()].map(([year, o]) => ({
     year, h: o.h, n: o.n, translated: o.preMonths * 2 > o.months,
-    err: o.preMonths ? Math.sqrt(o.rnd2 + (o.sys * o.h) ** 2) : 0,
+    err: o.preMonths ? Math.sqrt(o.rnd2 + (o.sys * o.h) ** 2) : 0, noData: o.noData,
   }));
 }
 
-export default function YearChart({ grid, series, naive, selectedYear, lastPartial }: Props) {
+export default function YearChart({ grid, series, naive, selectedYear, lastPartial, unit }: Props) {
   const meta = grid.meta;
   const { t, num } = useI18n();
   const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
@@ -75,6 +76,7 @@ export default function YearChart({ grid, series, naive, selectedYear, lastParti
             `${d.year}${d.year === first ? t.julDec : d.year === last && lastPartial ? t.toDate : ""}`,
             `${naive ? t.rawCount : t.harmonizedCount}: ${num(v)}${!naive && d.err ? ` ± ${num(d.err)}` : ""}`,
             naive ? (d.year < 2012 ? t.modisTA : t.viirsSnpp) : (d.translated ? t.translatedFrom : t.observedBy),
+            ...(d.noData ? [t.yearNoData(d.noData)] : []),
           ];
           return (
             <g key={d.year} onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, lines })}>
@@ -92,6 +94,7 @@ export default function YearChart({ grid, series, naive, selectedYear, lastParti
           );
         })}
         <line x1={L} x2={W} y1={y(0)} y2={y(0)} className="baseline" />
+        {unit && <text x={L + 4} y={T + 9} className="axis">{unit}</text>}
         {(() => {
           const i = years.findIndex((d) => d.year === 2012);
           if (i < 0) return null;

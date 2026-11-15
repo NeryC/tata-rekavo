@@ -58,6 +58,7 @@ export type Restored = {
   cal: "ratio" | "count";
   naive: boolean;
   newOnly: boolean;
+  metric: "count" | "frp";
 };
 
 /**
@@ -83,5 +84,6 @@ export function planRestore(first: string, nMonths: number, s: ShareState, defau
     cal: s.cal ?? "ratio",
     naive: !!s.naive,
     newOnly: !!s.newOnly,
+    metric: s.metric === "frp" ? "frp" : "count",
   };
 }

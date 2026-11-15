@@ -12,7 +12,8 @@ export interface Hotspot {
 }
 
 export const HOTSPOT_HEADER = "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp,daynight,product,harmonized_weight,new_place";
-export interface AppData { grid: Grid; current: CurrentMeta | null; hotspots: Hotspot[]; historyPeriod: string }
+/** currentJson: the raw current.json, kept so the FRP grid can be decoded later with the same months. */
+export interface AppData { grid: Grid; current: CurrentMeta | null; currentJson: unknown; hotspots: Hotspot[]; historyPeriod: string }
 
 export const url = (f: string) => `${import.meta.env.BASE_URL}${f}`;
 
@@ -72,6 +73,21 @@ export function loadSeason(): Promise<SeasonFile | null> {
   return seasonPromise;
 }
 
+let frpPromise: Promise<unknown | null> | null = null;
+/**
+ * frp.json (harmonized fire power, 2.4 MB), fetched once and only when the user switches to FRP.
+ * Resolves to null when it is missing or malformed: the FRP option is then disabled and the app keeps working.
+ * A failed fetch is not cached, so a later click can retry.
+ */
+export function loadFrp(): Promise<unknown | null> {
+  frpPromise ??= fetch(url("frp.json"))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => (j && j.meta && j.meta.months && Array.isArray(j.cells) && j.meta.error_model ? j : null))
+    .catch(() => null)
+    .then((j) => { if (!j) frpPromise = null; return j; });
+  return frpPromise;
+}
+
 export async function loadData(): Promise<AppData> {
   const [gridJson, currentJson, burnJson] = await Promise.all([
     fetch(url("grid.json")).then((r) => r.json()),
@@ -98,7 +114,7 @@ export async function loadData(): Promise<AppData> {
       return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv };
     });
   } catch { /* hotspots are optional */ }
-  return { grid, current: currentJson ? currentJson.meta : null, hotspots, historyPeriod: burnJson?.period ?? "" };
+  return { grid, current: currentJson ? currentJson.meta : null, currentJson, hotspots, historyPeriod: burnJson?.period ?? "" };
 }
 
 function interp(x: number, xs: number[], ys: number[]) {

@@ -7,8 +7,8 @@ export interface GridMeta {
   classes: ClassDef[];
   error_model: { c: number; p: number; sys_by_year: Record<string, number> };
   validation: {
-    leave_one_year_out: Record<string, { mdape_pct: number; n?: number }>;
-    anomaly_class_agreement: Record<string, { same_class_pct: number; spearman?: number }>;
+    leave_one_year_out: Record<string, { mdape_pct: number; p90_pct?: number; bias_pct?: number; n?: number }>;
+    anomaly_class_agreement?: Record<string, { same_class_pct: number; spearman?: number }>;
   };
   [k: string]: unknown;
 }
@@ -21,16 +21,22 @@ export interface CurrentMeta {
   days_without_data?: string[];
 }
 export interface Cell { m: number[]; h: number[]; modis: number[]; viirs: number[] }
-export interface Grid { meta: GridMeta; cells: Map<number, Cell>; nMonths: number }
+/** noData: month indices with no data for this metric (FRP months whose current.json cells carry no FRP); zoneSeries reports NaN there. */
+export interface Grid { meta: GridMeta; cells: Map<number, Cell>; nMonths: number; noData?: Set<number> }
 export interface Series { harmonized: Float64Array; modis: Float64Array; viirs: Float64Array; naive: Float64Array }
 export interface Verdict {
   m: number; label: string; year: number; month: number; value: number; median: number; ratio: number;
-  coverage: number; partial: boolean; class: ClassDef; relativeError: number; yearsCompared: number; rank: number | null;
+  coverage: number; partial: boolean;
+  /** true when the month has no data (value and ratio are NaN); `class` is then only a placeholder. */
+  noData: boolean;
+  class: ClassDef; relativeError: number; yearsCompared: number; rank: number | null;
 }
-export interface CalendarCell { m: number; value: number; ratio: number | null; class: string | null; relativeError: number }
+export interface CalendarCell { m: number; value: number; ratio: number | null; class: string | null; relativeError: number; noData?: boolean }
 export interface Calendar { rows: { year: number; cells: (CalendarCell | null)[]; total: number }[]; monthlyMedian: number[] }
 
 export function decodeGrid(gridJson: unknown, currentJson?: unknown): Grid;
+/** frp.json (+ current.json 4th array) as a Grid in MW; classes/regions come from gridMeta (grid.json meta). */
+export function decodeFrp(frpJson: unknown, currentJson?: unknown, gridMeta?: Partial<GridMeta> | null): Grid;
 export function monthOf(meta: GridMeta, m: number): { year: number; month: number; label: string };
 export function indexOf(meta: GridMeta, year: number, month: number): number;
 export function cellCenter(meta: GridMeta, idx: number): [number, number];
@@ -47,11 +53,11 @@ export interface DepartmentRow {
   classId: ClassDef["id"]; relativeError: number; lowSignal: boolean; partial: boolean;
 }
 export function departmentRanking(grid: Grid, departments: DepartmentDef[], m: number, coverage?: number): DepartmentRow[];
-export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null }
+export interface ValidationRow { area: "paraguay" | "chaco" | "oriental"; mdapePct: number; classAgreementPct: number | null; p90Pct?: number }
 export interface ValidationSummary { rows: ValidationRow[]; spearman: number | null; nMonths: number }
 export function validationSummary(meta: Partial<GridMeta>): ValidationSummary;
 export function calendar(grid: Grid, series: Float64Array): Calendar;
-export function seriesToCSV(grid: Grid, s: Series): string;
+export function seriesToCSV(grid: Grid, s: Series, opts?: { metric?: "count" | "frp" }): string;
 
 export interface SeasonClimatology { p10: ArrayLike<number>; p50: ArrayLike<number>; p90: ArrayLike<number> }
 export interface SeasonStatus {

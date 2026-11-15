@@ -11,12 +11,13 @@ import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadData, loadDepartments, loadSeason, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
+  HOTSPOT_HEADER, loadData, loadDepartments, loadFrp, loadSeason, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
 } from "./data";
 import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
 import { indexToMonth, planRestore } from "./shareRestore";
+import type { Grid } from "@core";
 import type { SeasonFile } from "./season";
-import { I18nContext, initialLang, makeI18n, saveLang, type Lang } from "./i18n";
+import { I18nContext, initialLang, makeI18n, saveLang, type Lang, type Metric } from "./i18n";
 
 type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom" | "department";
 const CLASS_STYLE: Record<string, { icon: string }> = {
@@ -29,7 +30,14 @@ const MAX_ROWS = 1_500_000;
 
 export default function App() {
   const [lang, setLang] = useState<Lang>(initialLang);
-  const i18n = useMemo(() => makeI18n(lang), [lang]);
+  // what the numbers mean: hotspot counts or harmonized fire power (MW). `metric` is what was asked for; `active`
+  // only switches once frp.json has loaded (it is fetched lazily, on the first switch).
+  const [metric, setMetric] = useState<Metric>("count");
+  const [frpGrid, setFrpGrid] = useState<Grid | null>(null);
+  const [frpLoading, setFrpLoading] = useState(false);
+  const [frpFailed, setFrpFailed] = useState(false);
+  const active: Metric = metric === "frp" && frpGrid ? "frp" : "count";
+  const i18n = useMemo(() => makeI18n(lang, active), [lang, active]);
   const { t, num } = i18n;
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,32 +87,50 @@ export default function App() {
       } else setPolygon(r.poly);
       setMonth(r.month);
       setRange(r.range);
-      setCalMode(r.cal); setNaive(r.naive); setNewOnly(r.newOnly);
+      setCalMode(r.cal); setNaive(r.naive); setNewOnly(r.newOnly); setMetric(r.metric);
       setData(d);
     }).catch((e) => setError(String(e)));
   }, []);
   useEffect(() => { document.documentElement.lang = lang; document.title = `Tata Rekavo · ${t.title}`; saveLang(lang); }, [lang, t]);
 
-  const grid = data?.grid;
+  // frp.json is 2.4 MB: only fetched once the reader asks for fire power
+  useEffect(() => {
+    if (metric !== "frp" || frpGrid || !data) return;
+    let alive = true;
+    setFrpLoading(true);
+    void loadFrp().then((j) => {
+      if (!alive) return;
+      setFrpLoading(false);
+      try {
+        if (!j) throw new Error("frp.json unavailable");
+        setFrpGrid(H.decodeFrp(j, data.currentJson, data.grid.meta));
+      } catch { setFrpFailed(true); setMetric("count"); }
+    });
+    return () => { alive = false; };
+  }, [metric, frpGrid, data]);
+
+  // countGrid fixes the geography (cells, areas, hotspot downloads); grid is the one the active measure reads
+  const countGrid = data?.grid;
+  const grid = active === "frp" && frpGrid ? frpGrid : countGrid;
   const regionOf = useMemo(() => {
     const r = new Map<number, string>();
-    if (grid) for (const idx of grid.cells.keys()) r.set(idx, regionOfCell(grid.meta, idx));
+    if (countGrid) for (const idx of countGrid.cells.keys()) r.set(idx, regionOfCell(countGrid.meta, idx));
     return r;
-  }, [grid]);
+  }, [countGrid]);
 
   const department = useMemo(
     () => (zoneKind === "department" && departmentId ? departments?.departments.find((d) => d.id === departmentId) ?? null : null),
     [zoneKind, departmentId, departments]);
 
   const zoneCells = useMemo(() => {
-    if (!grid) return [];
+    if (!countGrid) return [];
     if (zoneKind === "department" && department) return department.cells;
-    if (zoneKind === "custom" && polygon) return H.cellsInPolygon(grid, polygon);
-    if (zoneKind === "chaco" || zoneKind === "oriental") return [...grid.cells.keys()].filter((i) => regionOf.get(i) === zoneKind);
-    return [...grid.cells.keys()];
-  }, [grid, zoneKind, department, polygon, regionOf]);
+    if (zoneKind === "custom" && polygon) return H.cellsInPolygon(countGrid, polygon);
+    if (zoneKind === "chaco" || zoneKind === "oriental") return [...countGrid.cells.keys()].filter((i) => regionOf.get(i) === zoneKind);
+    return [...countGrid.cells.keys()];
+  }, [countGrid, zoneKind, department, polygon, regionOf]);
   const zoneSet = useMemo(() => new Set(zoneCells), [zoneCells]);
-  const zoneBBox = useMemo(() => (department ? department.bbox : grid && zoneCells.length ? bboxOfCells(grid.meta, zoneCells) : [-62.8, -27.7, -54.1, -19.1] as [number, number, number, number]), [grid, zoneCells, department]);
+  const zoneBBox = useMemo(() => (department ? department.bbox : countGrid && zoneCells.length ? bboxOfCells(countGrid.meta, zoneCells) : [-62.8, -27.7, -54.1, -19.1] as [number, number, number, number]), [countGrid, zoneCells, department]);
   // what the map outlines: the department boundary or the hand-made polygon
   const outline = useMemo<GeoJSON.Geometry | null>(() => (department ? department.geometry
     : zoneKind === "custom" && polygon ? { type: "LineString", coordinates: polygon } : null), [department, zoneKind, polygon]);
@@ -114,7 +140,7 @@ export default function App() {
 
   const monthValues = useMemo(() => {
     const out = new Map<number, number>();
-    if (!grid || month < 0) return out;
+    if (!grid || month < 0 || grid.noData?.has(month)) return out;
     for (const [idx, c] of grid.cells) {
       const k = c.m.indexOf(month);
       if (k >= 0 && c.h[k] > 0) out.set(idx, c.h[k]);
@@ -130,16 +156,16 @@ export default function App() {
 
   // estimated size of the hotspot download for this area and range
   useEffect(() => {
-    if (!grid || !data) return;
+    if (!countGrid || !data) return;
     let alive = true;
     hotspotIndex().then(() => { // warm the block index while the user decides
       if (!alive) return;
-      const hist = estimateHistoricalRows(grid, zoneCells, range[0], range[1]);
+      const hist = estimateHistoricalRows(countGrid, zoneCells, range[0], range[1]);
       const recent = data.hotspots.filter((h) => h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).length;
       setEstimate(Math.round(hist + recent));
     });
     return () => { alive = false; };
-  }, [grid, data, zoneCells, zoneSet, range]);
+  }, [countGrid, data, zoneCells, zoneSet, range]);
 
   // the state a shared link carries; null until the initial restore has run
   const shareQs = useMemo(() => {
@@ -148,6 +174,7 @@ export default function App() {
     const lastI = data.grid.nMonths - 1;
     const defStart = Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastI).year, 1));
     const s: ShareState = { lang, cal: calMode, naive, newOnly };
+    if (metric === "frp") s.metric = "frp";
     if (zoneKind === "custom") {
       if (coords) s.c = coords; else if (polygon) s.poly = polygon;
       if (coords || polygon) s.zone = "custom";
@@ -157,7 +184,7 @@ export default function App() {
     if (month >= 0 && month !== lastI) s.m = indexToMonth(first, month);
     if (range[0] !== defStart || range[1] !== lastI) s.range = [indexToMonth(first, range[0]), indexToMonth(first, range[1])];
     return encodeState(s);
-  }, [data, lang, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly]);
+  }, [data, lang, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric]);
 
   useEffect(() => {
     if (shareQs === null) return; // never overwrite the incoming URL before it has been restored
@@ -191,7 +218,7 @@ export default function App() {
     setZoneKind("paraguay"); setDepartmentId(null); setPolygon(null); setCoords(null);
     setMonth(lastM);
     setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
-    setCalMode("ratio"); setNaive(false); setNewOnly(false); setDlError(null);
+    setCalMode("ratio"); setNaive(false); setNewOnly(false); setMetric("count"); setDlError(null);
     setViewNonce((n) => n + 1);
     setMapMoved(false);
   }
@@ -200,7 +227,7 @@ export default function App() {
   const lastIdx = data ? data.grid.nMonths - 1 : -1;
   const startRange = data ? [Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastIdx).year, 1)), lastIdx] : [0, 0];
   const changed = !!data && (zoneKind !== "paraguay" || drawing || coordsOpen || month !== lastIdx
-    || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || mapMoved);
+    || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || metric !== "count" || mapMoved);
 
   const generated = data?.current?.generated;
   const stale = !!generated && isStale(generated, new Date());
@@ -247,7 +274,7 @@ export default function App() {
   );
 
   if (error) return <I18nContext.Provider value={i18n}><div className="app">{header}<div className="splash">{t.loadError} {error}</div></div></I18nContext.Provider>;
-  if (!data || !grid || !series || !analytics || month < 0) return <I18nContext.Provider value={i18n}><div className="app">{header}<div className="splash">{t.loading}</div></div></I18nContext.Provider>;
+  if (!data || !countGrid || !grid || !series || !analytics || month < 0) return <I18nContext.Provider value={i18n}><div className="app">{header}<div className="splash">{t.loading}</div></div></I18nContext.Provider>;
 
   const meta = grid.meta;
   const last = grid.nMonths - 1;
@@ -260,6 +287,8 @@ export default function App() {
   const monthLong = i18n.monthLong(selMonth);
   const monthsDesc = Array.from({ length: grid.nMonths }, (_, m) => m).reverse();
   const val = meta.validation?.leave_one_year_out;
+  const frpOn = active === "frp";
+  const experimental = frpOn && meta.experimental === true; // from the data, never inferred from meta.name
   const lastPartial = coverage(last) < 1;
   const small = zoneCells.length < 40;
   const nNew = zoneMonthHotspots.filter((h) => h.fresh).length;
@@ -280,11 +309,14 @@ export default function App() {
   const tooMany = (estimate ?? 0) > MAX_ROWS;
   const tag = (m: number) => { const o = H.monthOf(meta, m); return `${o.year}-${String(o.month).padStart(2, "0")}`; };
   const fileTag = `${zoneKind === "department" && department ? department.id : zoneKind}_${tag(range[0])}_${tag(range[1])}`;
-  const analyticsLines = [
+  const metricTag = frpOn ? "frp_" : ""; // the monthly CSV and the report say which measure they hold
+  const rangeEmpty = analytics.months === 0 && analytics.noData > 0; // every month in the range lacks data: no total to show
+  const analyticsLines = rangeEmpty ? [t.rangeNoData(analytics.noData)] : [
     t.rangeVsTypical(i18n.ratio(analytics.ratio), num(analytics.typical)),
     ...(analytics.peak.m >= 0 ? [t.rangePeak(ml(analytics.peak.m), num(analytics.peak.v))] : []),
     t.rangeMonths(analytics.above, analytics.below, analytics.months),
     ...(rangeNew ? [t.rangeNew(num(rangeNew))] : []),
+    ...(analytics.noData ? [t.rangeNoData(analytics.noData)] : []),
   ];
 
   const pickZone = (k: ZoneKind) => { setDrawing(false); setCoordsOpen(false); setZoneKind(k); setDepartmentId(null); if (k !== "custom") { setPolygon(null); setCoords(null); } };
@@ -396,11 +428,29 @@ export default function App() {
                 <button aria-label={t.next} onClick={() => setMonth(Math.min(last, month + 1))} disabled={month === last}>›</button>
               </div>
               {month !== last && <p className="meta"><button className="link" onClick={() => setMonth(last)}>{t.resetMonth}</button></p>}
+              <div className="metric">
+                <span className="metric-label" id="metric-label">{t.metricLabel}</span>
+                <div className="seg metric-seg" role="group" aria-labelledby="metric-label">
+                  <button aria-pressed={metric === "count"} className={metric === "count" ? "on" : ""} onClick={() => setMetric("count")}>{t.metricCount}</button>
+                  <button aria-pressed={metric === "frp"} className={metric === "frp" ? "on" : ""} disabled={frpFailed}
+                    onClick={() => setMetric("frp")}>{t.metricFrp}</button>
+                </div>
+                {frpFailed && <p className="note" role="status">{t.metricUnavailable}</p>}
+                {frpLoading && !frpFailed && <p className="note" role="status">{t.metricLoading}</p>}
+                {experimental && <p className="exp-note" role="status"><span className="exp-badge">{t.experimentalTag}</span> {t.experimentalNote}</p>}
+                <details>
+                  <summary>{t.metricHelpTitle}</summary>
+                  <p>{t.metricHelp}</p>
+                </details>
+              </div>
             </section>
 
             <section className={`verdict v-${v.class.id}`}>
               <div aria-live="polite">
-              <p className="v-when">{t.verdictWhen(i18n.monthLongLabel(selYear, selMonth), zoneLabel)}</p>
+              <p className="v-when">{t.verdictWhen(i18n.monthLongLabel(selYear, selMonth), zoneLabel)}{experimental && <> <span className="exp-badge">{t.experimentalTag}</span></>}</p>
+              {v.noData ? (
+                <p className="v-text v-nodata">{t.frpNoData(i18n.monthLongLabel(selYear, selMonth))}</p>
+              ) : (<>
               <p className="v-class"><span aria-hidden>{cls.icon}</span> {t.classes[v.class.id]}</p>
               <p className="v-main">
                 <span className="v-ratio">{Number.isFinite(v.ratio) ? `×${i18n.ratio(v.ratio)}` : "—"}</span>
@@ -420,6 +470,7 @@ export default function App() {
               </p>
               {v.partial && <p className="v-tag">{t.partialTag(Math.round(cov * 100))}</p>}
               <p className="v-src">{t.source} {sourceOf(meta, data.current, month, i18n)}</p>
+              </>)}
               <details>
                 <summary>{t.whatIsHotspot}</summary>
                 <p>{t.hotspotDef}</p>
@@ -428,7 +479,7 @@ export default function App() {
               <ValidationPanel meta={meta} />
             </section>
 
-            {ranking && (
+            {ranking && ranking.length > 0 && (
               <DepartmentRanking rows={ranking} monthLabel={monthLabel} coverage={cov} selectedId={zoneKind === "department" ? departmentId : null}
                 onSelect={pickDepartment} />
             )}
@@ -461,7 +512,13 @@ export default function App() {
               <Calendar grid={grid} series={series.harmonized} coverage={coverage} selected={month} onSelect={setMonth} mode={calMode} range={range} />
             </section>
 
-            {season && data.current?.to && (
+            {frpOn && season && data.current?.to && (
+              <section>
+                <h2>{t.seasonTitle(zoneLabel)}</h2>
+                <p className="note">{t.seasonCountsOnly}</p>
+              </section>
+            )}
+            {!frpOn && season && data.current?.to && (
               <section>
                 <h2>{t.seasonTitle(zoneLabel)}</h2>
                 <SeasonChart season={season} zoneKind={zoneKind} departmentId={departmentId} hotspots={data.hotspots} zone={zoneSet}
@@ -472,13 +529,15 @@ export default function App() {
             <section>
               <div className="h2row">
                 <h2>{t.perYear}</h2>
-                <div className="seg small" role="group" aria-label={t.perYear}>
-                  <button className={!naive ? "on" : ""} onClick={() => setNaive(false)}>{t.harmonized}</button>
-                  <button className={naive ? "on" : ""} onClick={() => setNaive(true)}>{t.rawSensors}</button>
-                </div>
+                {!frpOn && ( // raw sensor counts have no fire power counterpart in frp.json
+                  <div className="seg small" role="group" aria-label={t.perYear}>
+                    <button className={!naive ? "on" : ""} onClick={() => setNaive(false)}>{t.harmonized}</button>
+                    <button className={naive ? "on" : ""} onClick={() => setNaive(true)}>{t.rawSensors}</button>
+                  </div>
+                )}
               </div>
-              <YearChart grid={grid} series={series} naive={naive} selectedYear={selYear} lastPartial={lastPartial} />
-              <p className="note">{naive ? t.noteNaive : t.noteHarmonized}</p>
+              <YearChart grid={grid} series={series} naive={naive && !frpOn} selectedYear={selYear} lastPartial={lastPartial} unit={frpOn ? "MW" : undefined} />
+              <p className="note">{naive && !frpOn ? t.noteNaive : t.noteHarmonized}</p>
             </section>
 
             <section className="period">
@@ -506,7 +565,7 @@ export default function App() {
 
               <div className="analytics" aria-live="polite">
                 <h3>{t.rangeTitle(ml(range[0]), ml(range[1]), zoneLabel)}</h3>
-                <p className="big">{t.rangeTotal(num(analytics.total), analytics.err > 0 ? ` ±${num(analytics.err)}` : "")}</p>
+                {!rangeEmpty && <p className="big">{t.rangeTotal(num(analytics.total), analytics.err > 0 ? ` ±${num(analytics.err)}` : "")}</p>}
                 <ul>{analyticsLines.map((l) => <li key={l}>{l}</li>)}</ul>
                 {analytics.partial && <p className="tag">{t.rangePartial}</p>}
               </div>
@@ -514,8 +573,8 @@ export default function App() {
               <h3>{t.download}</h3>
               <div className="downloads">
                 <button onClick={() => {
-                  const lines = H.seriesToCSV(grid, series).trimEnd().split("\n");
-                  download(`tata-rekavo_monthly_${fileTag}.csv`, [lines[0], ...lines.slice(range[0] + 1, range[1] + 2)].join("\n") + "\n");
+                  const lines = H.seriesToCSV(grid, series, { metric: active }).trimEnd().split("\n");
+                  download(`tata-rekavo_monthly_${metricTag}${fileTag}.csv`, [lines[0], ...lines.slice(range[0] + 1, range[1] + 2)].join("\n") + "\n");
                 }}>{t.dlSeriesRange(ml(range[0]), ml(range[1]))}</button>
                 <button disabled={!!busy || tooMany || !zoneCells.length} onClick={downloadHotspots}>
                   {busy ?? t.dlHotspotsRange(ml(range[0]), ml(range[1]))}
@@ -523,7 +582,7 @@ export default function App() {
                 </button>
                 {tooMany && <p className="dl-error">{t.dlTooMany(num(estimate ?? 0))}</p>}
                 <button onClick={() => downloadReport({ grid, series, coverage, i18n, zoneLabel, range, rangeLabel, mode: calMode, analytics,
-                  lines: analyticsLines }, `tata-rekavo_report_${fileTag}.png`)}>{t.dlReport}</button>
+                  lines: analyticsLines }, `tata-rekavo_report_${metricTag}${fileTag}.png`)}>{t.dlReport}</button>
                 {dlError && <p className="dl-error">{t.dlFailed} {dlError}</p>}
               </div>
             </section>
@@ -533,7 +592,7 @@ export default function App() {
                 <summary>{t.aboutData}</summary>
                 <p>{t.footData(meta.months.last, data.current?.to ?? null)}</p>
                 {updatedLine}
-                {val && <p>{t.footValidation(val.country?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
+                {val && <p>{t.footValidation((val.country ?? val.paraguay)?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
                 <h3 className="about-h">{t.partnerTitle}</h3>
                 <p>{t.footBoundaries(departments?.meta.retrieved ?? GEOBOUNDARIES_RETRIEVED)}{" "}
                   <a href={GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
@@ -543,7 +602,7 @@ export default function App() {
             </footer>
           </aside>
 
-          <MapView grid={grid} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
+          <MapView grid={countGrid} metric={active} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
             outline={outline} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setDepartmentId(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)}

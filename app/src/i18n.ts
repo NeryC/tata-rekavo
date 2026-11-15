@@ -172,8 +172,49 @@ const en = {
   resetAll: "↺ Reset all", resetAllTitle: "Back to the start: Paraguay, current month, this year",
   copyLink: "Copy link", copyLinkTitle: "Copy a link to this exact view", linkCopied: "Link copied", linkCopyManual: "Copy this link",
   langLabel: "Idioma: español",
+  metricLabel: "Measure", metricAria: "What to measure", metricHelpTitle: "Hotspots or fire power?",
+  metricCount: "Hotspots", metricFrp: "Fire power (FRP)",
+  metricHelp: "Hotspots counts the pixels where the satellite saw fire. Fire power (FRP) adds up how much heat those fires radiate, in megawatts (MW): a big fire weighs more than a small one.",
+  metricLoading: "Loading fire power data…",
+  metricUnavailable: "Fire power data could not be loaded, so only hotspots are available.",
+  experimentalTag: "Experimental",
+  experimentalNote: "Experimental: the fire power translation is less accurate than the hotspot one. Read the validation before relying on it.",
+  frpNoData: (month: string) => `No fire power data for ${month} yet: the daily file for that month was written before it included FRP. The hotspot count is available under “Hotspots”.`,
+  frpNoDataShort: "no FRP data",
+  calNoData: "No FRP data for this month yet",
+  yearNoData: (n: number) => `${n} month${n === 1 ? "" : "s"} without FRP data, not counted`,
+  rangeNoData: (n: number) => `${n} month${n === 1 ? "" : "s"} without FRP data, left out of the total`,
+  seasonCountsOnly: "The season curve counts hotspots. Switch to “Hotspots” to see it.",
+  trustP90: "Error in 9 of 10 months (at most)",
+  trustExtra: "",
 };
 export type Dict = typeof en;
+
+/** What changes when the measure is fire power (MW) instead of hotspot counts; merged over the dictionary by makeI18n. */
+const frpEn: Partial<Dict> = {
+  hotspots: "MW",
+  whatIsHotspot: "What is fire power (FRP)?",
+  hotspotDef: "Fire radiative power: the heat a fire radiates at the moment the satellite passes, in megawatts (MW), measured per hotspot. The monthly figure adds it up over the area, so one intense fire counts more than a small one. Like hotspots, clouds can hide it.",
+  perYear: "Fire power per year (MW)",
+  harmonizedCount: "harmonized, MW",
+  chartAria: (a: number, b: number) => `Fire power in megawatts per year ${a}–${b}, harmonized`,
+  noteHarmonized: "One unit for 24 years: MODIS fire power before 2012 is translated to what VIIRS would have measured, with a factor per region and calendar month. The factors are ratios of sums, so one extreme hotspot cannot tilt them.",
+  calNoteCount: "Each square shows the harmonized fire power in MW. The “typical” row is the median of each month: it shows when the fire season happens.",
+  calModeCount: "MW",
+  rankingCounts: (v: string, med: string) => `${v} MW · usual ${med}`,
+  rankingCountsLow: (v: string) => `${v} MW`,
+  lowSignal: "Too little fire history in this month to compare against (a typical month has less than 10 MW), so a ratio would not be meaningful. Shown by fire power only.",
+  mapLegend: (m: string) => `Fire power (MW) per ~11 km cell, ${m}`,
+  rangeTotal: (v: string, err: string) => `${v} MW${err}`,
+  rangePeak: (m: string, v: string) => `Peak month: ${m} (${v} MW)`,
+  dlSeries: "Monthly fire power for this area (CSV)",
+  dlSeriesRange: (a: string, b: string) => `Monthly fire power (MW), ${a} to ${b} (CSV)`,
+  footValidation: (a: number, b: number, c: number) => `Fire power harmonization tested on held-out years: median monthly error ${a}% for Paraguay, ${b}% for the Chaco and ${c}% for the Oriental region.`,
+  trustIntro: "Before releasing it, the fire power translation was tested year by year: each year from 2012 to 2025 was held out in turn, its MODIS Aqua fire power was translated to the VIIRS scale (Aqua×f), and the result was compared with the fire power S-NPP actually measured, in months with at least 1 MW.",
+  trustExtra: "The translation factors are ratios of summed fire power, and the error is reported as the median and as the 90th percentile, so one extreme month or one 5,000 MW hotspot cannot hide or dominate it. Bias is the average signed error: near zero means no systematic over- or under-estimate.",
+  reportFooter: "Data: NASA FIRMS (MODIS C6.1, VIIRS 375 m), fire radiative power harmonized to VIIRS-equivalent MW. tata-rekavo.vercel.app",
+  catador: { ...en.catador, lowRobust: "ℹ️ Physical check: clearly below usual. Less fire power does not mean lower fire risk: unburned vegetation can build up." },
+};
 
 const es: Dict = {
   title: "¿Es normal este fuego?",
@@ -333,6 +374,47 @@ const es: Dict = {
   resetAll: "↺ Restablecer todo", resetAllTitle: "Volver al inicio: Paraguay, mes actual, este año",
   copyLink: "Copiar enlace", copyLinkTitle: "Copiar un enlace a esta vista exacta", linkCopied: "Enlace copiado", linkCopyManual: "Copiá este enlace",
   langLabel: "Language: English",
+  metricLabel: "Medida", metricAria: "Qué medir", metricHelpTitle: "¿Focos o potencia del fuego?",
+  metricCount: "Focos", metricFrp: "Potencia del fuego (FRP)",
+  metricHelp: "Focos cuenta los píxeles donde el satélite vio fuego. La potencia del fuego (FRP) suma cuánto calor irradian esos fuegos, en megavatios (MW): un incendio grande pesa más que uno chico.",
+  metricLoading: "Cargando datos de potencia del fuego…",
+  metricUnavailable: "No se pudieron cargar los datos de potencia del fuego, así que solo están disponibles los focos.",
+  experimentalTag: "Experimental",
+  experimentalNote: "Experimental: la traducción de la potencia del fuego es menos precisa que la de los focos. Leé la validación antes de apoyarte en ella.",
+  frpNoData: (month) => `Todavía no hay datos de potencia del fuego para ${month}: el archivo diario de ese mes se escribió antes de incluir la FRP. El conteo de focos está disponible en “Focos”.`,
+  frpNoDataShort: "sin datos de FRP",
+  calNoData: "Todavía no hay datos de FRP para este mes",
+  yearNoData: (n) => `${n} ${n === 1 ? "mes" : "meses"} sin datos de FRP, no contados`,
+  rangeNoData: (n) => `${n} ${n === 1 ? "mes" : "meses"} sin datos de FRP, fuera del total`,
+  seasonCountsOnly: "La curva de temporada cuenta focos. Cambiá a “Focos” para verla.",
+  trustP90: "Error en 9 de cada 10 meses (como máximo)",
+  trustExtra: "",
+};
+
+/** Lo que cambia cuando la medida es la potencia del fuego (MW) en vez del conteo de focos. */
+const frpEs: Partial<Dict> = {
+  hotspots: "MW",
+  whatIsHotspot: "¿Qué es la potencia del fuego (FRP)?",
+  hotspotDef: "Potencia radiativa del fuego: el calor que irradia un fuego cuando pasa el satélite, en megavatios (MW), medida en cada foco. La cifra mensual la suma sobre el área, así que un fuego intenso cuenta más que uno chico. Igual que los focos, las nubes pueden taparla.",
+  perYear: "Potencia del fuego por año (MW)",
+  harmonizedCount: "armonizado, MW",
+  chartAria: (a, b) => `Potencia del fuego en megavatios por año ${a}–${b}, armonizada`,
+  noteHarmonized: "Una sola unidad para 24 años: la potencia de MODIS antes de 2012 se traduce a lo que habría medido VIIRS, con un factor por región y mes. Los factores son cocientes de sumas, así que un solo foco extremo no los puede torcer.",
+  calNoteCount: "Cada cuadro muestra la potencia del fuego armonizada en MW. La fila “típico” es la mediana de cada mes: muestra cuándo es la temporada de fuego.",
+  calModeCount: "MW",
+  rankingCounts: (v, med) => `${v} MW · habitual ${med}`,
+  rankingCountsLow: (v) => `${v} MW`,
+  lowSignal: "Hay muy poco historial de fuego en este mes para comparar (un mes típico tiene menos de 10 MW), así que un cociente no sería significativo. Se muestra solo la potencia del fuego.",
+  mapLegend: (m) => `Potencia del fuego (MW) por celda de ~11 km, ${m}`,
+  rangeTotal: (v, err) => `${v} MW${err}`,
+  rangePeak: (m, v) => `Mes pico: ${m} (${v} MW)`,
+  dlSeries: "Potencia del fuego mensual de esta área (CSV)",
+  dlSeriesRange: (a, b) => `Potencia del fuego mensual (MW), ${a} a ${b} (CSV)`,
+  footValidation: (a, b, c) => `Armonización de la potencia del fuego probada con años escondidos: error mediano mensual de ${a}% para Paraguay, ${b}% para el Chaco y ${c}% para la Región Oriental.`,
+  trustIntro: "Antes de publicarla, la traducción de la potencia del fuego se probó año por año: se escondió cada año de 2012 a 2025, se tradujo su potencia de MODIS Aqua a la escala de VIIRS (Aqua×f) y se comparó el resultado con la potencia que S-NPP realmente midió, en meses con al menos 1 MW.",
+  trustExtra: "Los factores de traducción son cocientes de potencia sumada y el error se informa como mediana y como percentil 90, así que un mes extremo o un solo foco de 5.000 MW no lo puede ocultar ni dominar. El sesgo es el error promedio con signo: cerca de cero significa que no hay sobre- ni subestimación sistemática.",
+  reportFooter: "Datos: NASA FIRMS (MODIS C6.1, VIIRS 375 m), potencia radiativa del fuego armonizada a MW equivalentes de VIIRS. tata-rekavo.vercel.app",
+  catador: { ...es.catador, lowRobust: "ℹ️ Validación Física: claramente por debajo de lo habitual. Menos potencia del fuego no significa menor riesgo: la vegetación sin quemar puede acumularse." },
 };
 
 function ordinalEn(n: number) {
@@ -342,8 +424,13 @@ function ordinalEn(n: number) {
 
 export const DICTS: Record<Lang, Dict> = { en, es };
 
+export type Metric = "count" | "frp";
+/** The dictionary for a language and measure: with fire power (MW) the wording of units and help changes. */
+export const dictFor = (lang: Lang, metric: Metric): Dict => (metric === "frp" ? { ...DICTS[lang], ...(lang === "es" ? frpEs : frpEn) } : DICTS[lang]);
+
 export interface I18n {
   lang: Lang;
+  metric: Metric;
   t: Dict;
   num: (n: number) => string;
   ratio: (r: number) => string;
@@ -356,10 +443,10 @@ export interface I18n {
   initials: string[];
 }
 
-export function makeI18n(lang: Lang): I18n {
+export function makeI18n(lang: Lang, metric: Metric = "count"): I18n {
   const loc = lang === "es" ? "es-PY" : "en-US";
   return {
-    lang, t: DICTS[lang],
+    lang, metric, t: dictFor(lang, metric),
     num: (n) => Math.round(n).toLocaleString(loc),
     ratio: (r) => r.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     monthShort: (m) => MONTHS_SHORT[lang][m - 1],
