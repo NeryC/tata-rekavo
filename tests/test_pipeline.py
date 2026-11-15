@@ -876,6 +876,35 @@ def test_fix_mojibake_repairs_utf8_read_as_latin1_and_keeps_clean_text():
     assert firms_pipeline._fix_mojibake(None) is None
 
 
+@pytest.mark.parametrize("in_memory", [False, True])
+def test_archive_calibration_excludes_hotspots_outside_the_published_grid(tmp_path, in_memory):
+    """Galapagos must not change mainland Ecuador counts, FRP factors or outage dates."""
+    import pandas as pd
+
+    base = {"latitude": -1.0, "longitude": -78.0, "acq_date": "2013-03-05",
+            "acq_time": "1330", "type": 0, "frp": 10.0}
+    modis = [{**base, "satellite": "Aqua"}, {**base, "satellite": "Terra"}]
+    modis += [{**base, "longitude": -90.5, "satellite": "Aqua", "frp": 1000.0}] * 10
+    # An island-only day must not expand the mainland outage/validation calendar.
+    modis += [{**base, "longitude": -90.5, "satellite": "Aqua", "acq_date": "2013-03-06"}]
+    pd.DataFrame(modis).to_csv(tmp_path / "modis_2013_Ecuador.csv", index=False)
+    pd.DataFrame([{**base, "satellite": "N", "frp": 20.0}] * 2).to_csv(
+        tmp_path / "viirs-snpp_2013_Ecuador.csv", index=False)
+
+    cfg = load_country("ECU")
+    arch = firms_pipeline.open_archives(cfg, tmp_path, in_memory=in_memory)
+    assert arch.daily.df.n.sum() == 4
+    assert arch.flags.index.tolist() == [pd.Timestamp("2013-03-05")]
+    frames = pd.concat(list(arch.frames()), ignore_index=True)
+    assert len(frames) == 4 and (frames.longitude == -78.0).all()
+    for metric, expected in [(None, 2.0), ("frp", 4.0)]:
+        factors, _ = firms_pipeline.compute_factors(
+            arch.daily, arch.flags, value_col=metric,
+            regions=cfg.region_names, min_hotspots=cfg.factor_min_hotspots)
+        assert factors["country"]["aqua"][3] == expected
+        assert factors["country"]["terra"][3] == expected
+
+
 # ----------------------------------------------------------------------------- anomaly agreement
 def test_agreement_stat_without_enough_or_varying_months_has_no_statistic():
     import pandas as pd

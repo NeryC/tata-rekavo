@@ -509,8 +509,12 @@ def vegetation(a):
 
 
 def prepare_hotspots(a, cfg: CountryConfig):
-    """Vegetation-fire hotspots of an archive frame, with their factor region and month index m."""
-    v = vegetation(a).copy()
+    """Vegetation fires inside the published grid, with their factor region and month index m.
+    Apply the same extent before calibration, outage detection and validation as before grid aggregation
+    (for example, Ecuador's mainland grid excludes Galapagos even though FIRMS archives include it)."""
+    v = vegetation(a)
+    _, _, inside = cell_of(v.latitude.values, v.longitude.values, cfg.grid)
+    v = v.loc[inside].copy()
     v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
     v["m"] = month_index(v.year.values, v.month.values)
     return v
