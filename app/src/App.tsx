@@ -261,6 +261,9 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     if (!id || !data || !hotspotsReady) return;
     const el = document.getElementById(id);
     if (!el) return;
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
     pendingHash.current = "";
     requestAnimationFrame(() => el.scrollIntoView({ block: "start" }));
   }, [data, hotspotsReady, season]);
@@ -578,12 +581,6 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
         {header}
         <main>
           <aside className="panel">
-            <Glance country={country} countries={countries} monthTitle={nowLabel}
-              now={countryNow && !countryNow.v.noData ? { classId: countryNow.v.class.id, ratio: Number.isFinite(countryNow.v.ratio) ? countryNow.v.ratio : null } : null}
-              top={topNow} hasDepartments={!!countryNow?.rows?.length}
-              onTop={() => { if (topNow && countryNow) { setMonth(countryNow.m); pickDepartment(topNow.id); } }}
-              onShare={() => void shareAlert()} onCopy={() => void copyAlert()} cases={cases} summary={summary}
-              onCountry={(c) => onCountry(c, null)} />
             <section className="sec-area">
               <h2>{t.step1}</h2>
               <div className={presetIds.length > 3 ? "seg area many" : "seg area"} role="group" aria-label={t.areaPresets}>
@@ -652,14 +649,16 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
             <section className={`verdict v-${v.noData ? "nodata" : v.class.id}`}>
               <div aria-live="polite">
               <p className="v-when">{t.verdictWhen(i18n.monthLongLabel(selYear, selMonth), zoneLabel)}{experimental && <> <span className="exp-badge">{t.experimentalTag}</span></>}</p>
+              <p className="v-context">{t.glanceNotice}</p>
               {v.noData ? (
                 <p className="v-text v-nodata">{t.frpNoData(i18n.monthLongLabel(selYear, selMonth))}</p>
               ) : (<>
               <p className="v-class"><span aria-hidden>{cls.icon}</span> {t.classes[v.class.id]}</p>
               <p className="v-main">
-                <span className="v-ratio">{Number.isFinite(v.ratio) ? `×${i18n.ratio(v.ratio)}` : "—"}</span>
-                <span className="v-of">{t.ofUsual}</span>
+                <span className="v-ratio">{num(v.value)}</span>
+                <span className="v-of">{t.hotspots}{v.relativeError > 0 && <> (±{Math.round(v.relativeError * 100)}%)</>}</span>
               </p>
+              <p className="v-comparison">{Number.isFinite(v.ratio) ? `×${i18n.ratio(v.ratio)}` : "—"} {t.ofUsual}</p>
               <div className="v-scale" role="img" aria-label={t.scaleAria(Number.isFinite(v.ratio) ? i18n.ratio(v.ratio) : "—")}>
                 <div className="v-track">
                   {CLASS_IDS.map((id) => <span key={id} className={id === v.class.id ? "on" : ""} />)}
@@ -668,7 +667,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                 <div className="v-labels">{CLASS_IDS.map((id) => <span key={id} className={id === v.class.id ? "on" : ""}>{t.scale[id]}</span>)}</div>
               </div>
               <p className="v-text">
-                <b>{num(v.value)}</b> {t.hotspots}{v.relativeError > 0 && <> (±{Math.round(v.relativeError * 100)}%)</>}. {t.usualIs(monthLong, v.partial)}{" "}
+                {t.usualIs(monthLong, v.partial)}{" "}
                 <b>{num(v.median)}</b> {t.medianOf(v.yearsCompared)}
                 {v.rank !== null && v.yearsCompared >= 5 && <> {t.rank(v.rank, monthLong, v.yearsCompared + 1)}</>}
               </p>
@@ -731,6 +730,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               </>) : <p className="note">{t.newUnavailable}</p>}
             </section>}
 
+            <section className="history-section"><details>
+              <summary><h2>{t.exploreHistory}</h2></summary>
             <section>
               <div className="h2row">
                 <h2>{t.calendarTitle(zoneLabel)}</h2>
@@ -769,9 +770,10 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               <YearChart grid={grid} series={series} naive={naive && !frpOn} selectedYear={selYear} lastPartial={lastPartial} unit={frpOn ? "MW" : undefined} />
               <p className="note">{naive && !frpOn ? t.noteNaive : t.noteHarmonized}</p>
             </section>
+            </details></section>
 
             <section className="period">
-              <h2>{t.step3}</h2>
+              <details><summary><h2>{t.analysisAndDownloads}</h2></summary>
               <div className="range-row">
                 <label>{t.rangeFrom}
                   <select value={range[0]} onChange={(e) => setRangeSafe(+e.target.value, range[1])}>
@@ -817,8 +819,15 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                   lines: analyticsLines }, `tata-rekavo_report_${metricTag}${fileTag}.png`)}>{t.dlReport}</button>
                 {dlError && <p className="dl-error">{t.dlFailed} {dlError}</p>}
               </div>
+              </details>
             </section>
 
+            <Glance country={country} countries={countries} monthTitle={nowLabel}
+              now={countryNow && !countryNow.v.noData ? { classId: countryNow.v.class.id, ratio: Number.isFinite(countryNow.v.ratio) ? countryNow.v.ratio : null } : null}
+              top={topNow} hasDepartments={!!countryNow?.rows?.length}
+              onTop={() => { if (topNow && countryNow) { setMonth(countryNow.m); pickDepartment(topNow.id); } }}
+              onShare={() => void shareAlert()} onCopy={() => void copyAlert()} cases={cases} summary={summary}
+              onCountry={(c) => onCountry(c, null)} />
             <footer className="about">
               <details>
                 <summary>{t.aboutData}</summary>

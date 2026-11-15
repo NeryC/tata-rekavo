@@ -34,8 +34,9 @@ export default function Glance({ country, countries, monthTitle, now, top, hasDe
   const south = countries && summary ? countries.filter((c) => summary.countries[c.iso3]) : [];
   return (
     <section className="glance" aria-labelledby="glance-title">
-      <h2 id="glance-title">{t.glanceTitle(name, monthTitle)}</h2>
-      <p className="g-notice">{t.glanceNotice}</p>
+      <details className="glance-more">
+      <summary><h2 id="glance-title">{t.exploreOtherPlaces}</h2></summary>
+      <h3>{t.glanceTitle(name, monthTitle)}</h3>
       {now && (
         <p className="g-now">
           <span className={`g-chip c-${now.classId}`}><span aria-hidden>{ICON[now.classId]}</span> {t.classes[now.classId]}</span>
@@ -88,6 +89,7 @@ export default function Glance({ country, countries, monthTitle, now, top, hasDe
           <p className="note">{t.southNote}</p>
         </div>
       )}
+      </details>
     </section>
   );
 }
