@@ -609,3 +609,75 @@ test("validationSummary for Bolivia: country and the five biomes, block / cell l
   assert.equal(f.rows[0].mdapePct, 9.1);
   assert.equal(f.rows.length, 6);
 });
+
+// ---------------------------------------------------------------- indigenous territories (indigenous.json: same shape, other source)
+test("protectedSummary: countryZone names the whole-country zone and a region id (a biome) selects by regions", () => {
+  const forest = area("f", "Forest land", [[50, 12]], { departments: ["d1"], regions: ["biome-a"] });
+  const dry = area("g", "Dry land", [[50, 3]], { departments: ["d2"], regions: ["biome-b"] });
+  const ctx = ctxOf([forest, dry], {
+    bolivia: { m: [50], n: [15], frp: [150] }, "biome-a": { m: [50], n: [12], frp: [120] }, "biome-b": { m: [50], n: [3], frp: [30] },
+    d1: { m: [50], n: [12], frp: [120] }, d2: { m: [50], n: [3], frp: [30] },
+  });
+  const names = (z, opts = { countryZone: "bolivia" }) => protectedSummary(ctx, z, 50, "count", 1, opts).areas.map((a) => a.name);
+  assert.deepEqual(names("bolivia"), ["Forest land", "Dry land"]);
+  assert.deepEqual(names("biome-a"), ["Forest land"]);
+  assert.deepEqual(names("biome-b"), ["Dry land"]);
+  assert.deepEqual(names("d2"), ["Dry land"]);
+  assert.equal(protectedSummary(ctx, "bolivia", 50, "count", 1, { countryZone: "bolivia", zoneValue: 30 }).share, 0.5);
+  // without countryZone the country zone is "paraguay" (as before): "bolivia" is then just a zone nobody belongs to
+  assert.deepEqual(names("bolivia", {}), []);
+});
+
+test("protectedSummary: by_zone_default 'whole' gives a listed zone without a by_zone entry the area's whole series", () => {
+  const t = area("t", "Territory", [[38, 4], [50, 9]], {
+    departments: ["d1", "d2", "d3"], regions: ["r1"],
+    by_zone: { d2: { m: [50], n: [2], frp: [20] }, d3: { m: [], n: [], frp: [] } },   // d2 differs, d3 is listed but has no fire there
+  });
+  const zones = { country: { m: [50], n: [9], frp: [90] }, r1: { m: [50], n: [9], frp: [90] }, d1: { m: [50], n: [9], frp: [90] }, d2: { m: [50], n: [2], frp: [20] }, d3: { m: [], n: [], frp: [] } };
+  const whole = { ...ctxOf([t], zones), meta: { first: "2002-07", through: "2006-09", by_zone_default: "whole" } };
+  const row = (c, z) => protectedSummary(c, z, 50, "count", 1, { countryZone: "country" }).areas[0];
+  assert.equal(row(whole, "d1").value, 9);                               // no entry: the whole series (and its own history: m 38 -> 4)
+  assert.equal(row(whole, "r1").value, 9);
+  assert.equal(row(whole, "d2").value, 2);                               // an entry: that series
+  assert.equal(row(whole, "d3").value, 0);                               // explicit empty
+  assert.equal(row(whole, "country").value, 9);
+  // a file without the default keeps the old rule: a zone missing from by_zone is 0
+  const plain = ctxOf([t], zones);
+  assert.equal(row(plain, "d1").value, 0);
+  assert.equal(row(plain, "d2").value, 2);
+});
+
+test("protectedSummary: rows carry category and ethnicity when the record has them (territories), nothing extra otherwise", () => {
+  const withInfo = area("w", "Comunidad", [[50, 5]], { category: "Comunidad Nativa", ethnicity: "Awajun", identity: "Indigenous" });
+  const without = area("x", "Sin etnia", [[50, 4]], { category: "Tierra Comunitaria de Origen" });
+  const plain = area("p", "Park", [[50, 3]]);
+  const ctx = ctxOf([withInfo, without, plain], { paraguay: { m: [50], n: [12], frp: [120] } });
+  const rows = Object.fromEntries(protectedSummary(ctx, "paraguay", 50).areas.map((r) => [r.id, r]));
+  assert.equal(rows.w.category, "Comunidad Nativa"); assert.equal(rows.w.ethnicity, "Awajun");
+  assert.equal(rows.x.category, "Tierra Comunitaria de Origen"); assert.ok(!("ethnicity" in rows.x));
+  assert.ok(!("category" in rows.p) && !("ethnicity" in rows.p));
+});
+
+const COUNTRY_DIRS = { PRY: "", BOL: "BOL/", ECU: "ECU/", PER: "PER/" };
+for (const [iso3, sub] of Object.entries(COUNTRY_DIRS)) {
+  test(`protectedSummary: reads the real indigenous.json of ${iso3} (no area exceeds its zone's union, statistics only)`, (t) => {
+    const dir = new URL(`../data/app/${sub}`, import.meta.url);
+    let ctx;
+    try { ctx = JSON.parse(readFileSync(new URL("indigenous.json", dir), "utf8")); } catch { return t.skip("indigenous.json not present"); }
+    const g = JSON.parse(readFileSync(new URL("grid.json", dir), "utf8"));
+    const countryZone = Object.keys(ctx.zones)[0];
+    const sep = indexOf(g.meta, 2024, 9);
+    const s = protectedSummary(ctx, countryZone, sep, "count", 1, { classes: g.meta.classes, countryZone });
+    assert.ok(countryZone && s.inside > 0 && s.areas.length > 0);
+    assert.ok(s.areas.every((a, i, l) => i === 0 || l[i - 1].value >= a.value));
+    // every region and department zone: each territory's share of the zone stays within the zone's union total
+    for (const z of Object.keys(ctx.zones)) {
+      const zs = protectedSummary(ctx, z, sep, "count", 1, { classes: g.meta.classes, countryZone });
+      assert.ok(zs.areas.every((a) => a.value <= zs.inside + 0.11), `${iso3} ${z}`);
+    }
+    // statistics only: no geometry-like key anywhere in an area record or the header
+    const bad = new Set(["geometry", "coordinates", "bbox", "centroid", "lat", "lon", "latitude", "longitude"]);
+    assert.ok(ctx.areas.every((a) => !Object.keys(a).some((k) => bad.has(k))) && !Object.keys(ctx.meta).some((k) => bad.has(k)));
+    assert.equal(ctx.meta.license, "CC BY-SA 4.0");
+  });
+}
