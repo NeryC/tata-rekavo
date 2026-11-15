@@ -4,6 +4,7 @@ import { validateContext } from "./contextCheck";
 import { biomePresets } from "./regions";
 import type { I18n } from "./i18n";
 import type { SeasonFile } from "./season";
+import { liveFileUrl, storeBase, validManifest, type LiveManifest } from "./liveData";
 
 export interface Hotspot {
   lon: number; lat: number; date: string; m: number; frp: number; cell: number;
@@ -74,6 +75,38 @@ function once<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promis
   return p;
 }
 const getJson = (f: string, path: string) => fetch(url(f, path)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const getUrlJson = (u: string, init?: RequestInit) => fetch(u, init).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+// ---------------------------------------------------------------- live data store (see liveData.ts)
+let liveStore: Promise<{ base: string; manifest: LiveManifest } | null> | null = null;
+/** live.json + the store's latest.json, fetched once per page; null when there is no store or it does not answer. */
+function loadLiveStore() {
+  return (liveStore ??= getJson("live.json", "").then(async (cfg) => {
+    const base = storeBase(cfg);
+    if (!base) return null;
+    const manifest = validManifest(await getUrlJson(base + "latest.json", { cache: "no-cache" }));
+    return manifest ? { base, manifest } : null;
+  }));
+}
+
+const generatedOf = (j: unknown) => {
+  const g = (j as { meta?: { generated?: unknown } } | null)?.meta?.generated;
+  const t = typeof g === "string" ? Date.parse(g) : NaN;
+  return Number.isFinite(t) ? t : -Infinity;
+};
+
+/** current.json and the hotspot CSV URL of a country, from the live store when it has a newer run than the site's
+ *  own files, else from the site. Both files always come from the same source, so they describe the same days. */
+async function currentSource(path: string, iso3: string | undefined): Promise<{ currentJson: unknown; hotspotsUrl: string }> {
+  const bundled = { hotspotsUrl: url("current_hotspots.csv", path) };
+  const [own, live] = await Promise.all([getJson("current.json", path), iso3 ? loadLiveStore() : Promise.resolve(null)]);
+  const liveUrl = live ? liveFileUrl(live.base, live.manifest, iso3!, "current.json") : null;
+  const liveJson = liveUrl ? await getUrlJson(liveUrl) : null;
+  if (liveJson && (liveJson as { meta?: unknown }).meta && generatedOf(liveJson) > generatedOf(own)) {
+    return { currentJson: liveJson, hotspotsUrl: liveFileUrl(live!.base, live!.manifest, iso3!, "current_hotspots.csv")! };
+  }
+  return { currentJson: own, ...bundled };
+}
 
 // ---------------------------------------------------------------- factor regions
 export interface RegionCells { meta?: { kind?: string; source?: string; note?: string }; regions: { id: string; label?: string; cells: number[] }[] }
@@ -179,10 +212,10 @@ export function loadFrp(path = ""): Promise<unknown | null> {
 }
 
 /** Everything the first screen of a country needs. Only grid.json is required; the other files are optional. */
-export async function loadData(path = ""): Promise<AppData> {
-  const [gridJson, currentJson, burnJson] = await Promise.all([
+export async function loadData(path = "", iso3?: string): Promise<AppData> {
+  const [gridJson, { currentJson, hotspotsUrl }, burnJson] = await Promise.all([
     fetch(url("grid.json", path)).then((r) => r.json()),
-    getJson("current.json", path),
+    currentSource(path, iso3),
     getJson("burn_history.json", path) as Promise<BurnHistory | null>,
   ]);
   const grid = H.decodeGrid(gridJson, currentJson);
@@ -192,7 +225,7 @@ export async function loadData(path = ""): Promise<AppData> {
   const regionCells = grid.meta.regions?.kind === "biome" ? validRegionCells(await getJson("regions.json", path)) : null;
   let hotspots: Hotspot[] = [];
   try {
-    const txt = await fetch(url("current_hotspots.csv", path)).then((r) => (r.ok ? r.text() : ""));
+    const txt = await fetch(hotspotsUrl).then((r) => (r.ok ? r.text() : ""));
     const lines = txt.trim().split("\n");
     const cols = lines[0].split(",");
     const col = (n: string) => cols.indexOf(n);
@@ -208,7 +241,7 @@ export async function loadData(path = ""): Promise<AppData> {
       return { lat, lon, date, frp: +f[iFrp], m: H.indexOf(grid.meta, y, mo), cell: H.cellAt(grid.meta, lon, lat), fresh, csv };
     });
   } catch { /* hotspots are optional */ }
-  return { grid, current: currentJson ? currentJson.meta : null, currentJson, hotspots, historyPeriod: burnJson?.period ?? "", hasBurnHistory, regionCells };
+  return { grid, current: currentJson ? (currentJson as { meta: CurrentMeta }).meta : null, currentJson, hotspots, historyPeriod: burnJson?.period ?? "", hasBurnHistory, regionCells };
 }
 
 function interp(x: number, xs: number[], ys: number[]) {
