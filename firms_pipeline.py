@@ -1345,7 +1345,8 @@ def cmd_fetch_current(args):
     mask = np.unpackbits(np.frombuffer(base64.b64decode(mk["bits_b64"]), np.uint8))[: mg.rows * mg.cols].reshape(mg.rows, mg.cols).astype(bool)
     start = pd.Timestamp(args.start)
     end = pd.Timestamp(args.end) if args.end else pd.Timestamp(dt.date.today())
-    cache = args.cache
+    # cached requests are named <product>_<date>_<span>.csv without the area: other countries get their own subfolder
+    cache = args.cache if cfg.iso3 == DEFAULT_COUNTRY else os.path.join(args.cache, cfg.iso3)
     os.makedirs(cache, exist_ok=True)
     rd = {"acq_time": str, "confidence": str, "version": str, "satellite": str}
 

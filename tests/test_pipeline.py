@@ -238,6 +238,24 @@ def test_fetch_current_offline_uses_cache_without_network(tmp_path, monkeypatch)
     assert not list(out.glob("*.tmp"))
 
 
+def test_fetch_current_caches_other_countries_in_their_own_folder(tmp_path, monkeypatch):
+    bol = load_country("BOL")
+    out = tmp_path / "app"
+    out.mkdir()
+    n = bol.mask_grid.rows * bol.mask_grid.cols
+    (out / "mask.json").write_text(json.dumps({"bits_b64": base64.b64encode(np.packbits(np.ones(n, bool)).tobytes()).decode()}))
+    args = argparse.Namespace(out=str(out), map_key=KEY, start="2026-01-01", end="2026-01-03",
+                              cache=str(tmp_path / "cache"), offline=False, country="BOL")
+    av = b"\n".join([b"data_id,min_date,max_date", b"VIIRS_SNPP_SP,2026-01-01,2026-01-03", b""])
+    csv = b"\n".join([b"latitude,longitude,acq_date,acq_time,confidence,type", b"-16.0,-63.0,2026-01-02,0130,n,0", b""])
+    monkeypatch.setattr(firms_pipeline, "http_get", lambda url, timeout=300: (200, av if "data_availability" in url else csv))
+    monkeypatch.setattr(firms_pipeline.time, "sleep", lambda s: None)
+    cmd_fetch_current(args)
+    assert list((tmp_path / "cache" / "BOL").glob("VIIRS_SNPP_SP_*.csv"))
+    assert not list((tmp_path / "cache").glob("*.csv"))   # the Paraguay cache folder is untouched
+    assert json.loads((out / "current.json").read_text())["cells"]
+
+
 # ----------------------------------------------------------------------------- departments (build-regions)
 from pathlib import Path
 
