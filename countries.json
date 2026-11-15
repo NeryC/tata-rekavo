@@ -62,5 +62,35 @@
       },
       "note": "Simplified department boundaries (geoBoundaries gbOpen BOL ADM1). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
     }
+  },
+  "URY": {
+    "name": "Uruguay",
+    "firms_name": "Uruguay",
+    "area": "uruguay",
+    "bbox": [-58.5, -35.0, -53.0, -30.0],
+    "deg": 0.1,
+    "lat0": -35.0,
+    "lon0": -58.5,
+    "rows": 50,
+    "cols": 55,
+    "regions": {
+      "kind": "biome",
+      "source": "data/ext/biomes_latam.npz",
+      "min_hotspots": 500,
+      "names": ["tropical-subtropical-grasslands-savannas-shrublands"]
+    },
+    "export_hotspots": false,
+    "burn_history": false,
+    "mask": {"deg": 0.05, "rows": 100, "cols": 110},
+    "departments": {
+      "names": {
+        "artigas": "Artigas", "canelones": "Canelones", "cerro-largo": "Cerro Largo", "colonia": "Colonia",
+        "durazno": "Durazno", "flores": "Flores", "florida": "Florida", "lavalleja": "Lavalleja",
+        "maldonado": "Maldonado", "montevideo": "Montevideo", "paysandu": "Paysandú", "rio-negro": "Río Negro",
+        "rivera": "Rivera", "rocha": "Rocha", "salto": "Salto", "san-jose": "San José", "soriano": "Soriano",
+        "tacuarembo": "Tacuarembó", "treinta-y-tres": "Treinta y Tres"
+      },
+      "note": "Simplified department boundaries (geoBoundaries gbOpen URY ADM1). A cell belongs to the department containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest department."
+    }
   }
 }

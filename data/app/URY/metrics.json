@@ -1,0 +1,210 @@
+{
+ "method": "Aqua-based factor per region x calendar month, clean overlap days",
+ "leave_one_year_out": {
+  "country": {
+   "mdape_pct": 21.1,
+   "p90_ape_pct": 70.6,
+   "bias_pct": 0.6,
+   "n": 167,
+   "min_obs": 1
+  },
+  "tropical-subtropical-grasslands-savannas-shrublands": {
+   "mdape_pct": 20.9,
+   "p90_ape_pct": 70.5,
+   "bias_pct": 0.8,
+   "n": 167,
+   "min_obs": 1
+  },
+  "block_1deg": {
+   "mdape_pct": 24.2,
+   "p90_ape_pct": 63.2,
+   "bias_pct": 0.6,
+   "n": 132,
+   "min_obs": 50
+  },
+  "cell_0.5deg": {
+   "mdape_pct": 37.6,
+   "p90_ape_pct": 77.7,
+   "bias_pct": 0.6,
+   "n": 129,
+   "min_obs": 30
+  },
+  "cell_0.25deg": {
+   "mdape_pct": 36.9,
+   "p90_ape_pct": 100.0,
+   "bias_pct": 0.6,
+   "n": 146,
+   "min_obs": 20
+  },
+  "cell_0.1deg": {
+   "mdape_pct": 58.3,
+   "p90_ape_pct": 106.7,
+   "bias_pct": 0.6,
+   "n": 367,
+   "min_obs": 10
+  }
+ },
+ "backward_train_2019_2025_bias_pct": {
+  "2012": 16.9,
+  "2013": 19.8,
+  "2014": 18.8,
+  "2015": 15.4,
+  "2016": 16.1,
+  "2017": 9.7,
+  "2018": -10.1
+ },
+ "anomaly_class_agreement": {
+  "country": {
+   "spearman": 0.808,
+   "same_class_pct": 71.3,
+   "n": 167
+  },
+  "tropical-subtropical-grasslands-savannas-shrublands": {
+   "spearman": 0.81,
+   "same_class_pct": 71.9,
+   "n": 167
+  },
+  "block_1deg": {
+   "spearman": 0.87,
+   "same_class_pct": 69.1,
+   "n": 97
+  }
+ },
+ "error_model": {
+  "formula": "relative_error(n) = min(1, c * n^(-p)) where n = harmonized hotspots in the zone-month; for months before viirs_start add the systematic term in quadrature: sqrt(rel^2 + sys[year]^2); months from viirs_start are observed (no translation error)",
+  "c": 1.1572,
+  "p": 0.2545,
+  "sys_by_year": {
+   "2002": 0.094,
+   "2003": 0.062,
+   "2004": 0.008,
+   "2005": 0.018,
+   "2006": 0.117,
+   "2007": 0.07,
+   "2008": 0.082,
+   "2009": 0.084,
+   "2010": 0.038,
+   "2011": 0.025,
+   "2012": 0.197
+  },
+  "meaning": "median absolute relative error (about half of zone-months fall inside the band)",
+  "fit_bins": [
+   [
+    3.8,
+    0.734,
+    1861,
+    0.8246
+   ],
+   [
+    4.7,
+    0.754,
+    4789,
+    0.7816
+   ],
+   [
+    6.6,
+    0.8376,
+    509,
+    0.7167
+   ],
+   [
+    7.7,
+    0.7331,
+    2647,
+    0.6889
+   ],
+   [
+    10.7,
+    0.6753,
+    1477,
+    0.6331
+   ],
+   [
+    13.6,
+    0.6551,
+    1143,
+    0.5952
+   ],
+   [
+    16.3,
+    0.6201,
+    772,
+    0.5685
+   ],
+   [
+    20.8,
+    0.5259,
+    678,
+    0.5343
+   ],
+   [
+    27.6,
+    0.4965,
+    508,
+    0.4973
+   ],
+   [
+    35.6,
+    0.4162,
+    282,
+    0.4664
+   ],
+   [
+    44.4,
+    0.5103,
+    200,
+    0.4409
+   ],
+   [
+    56.9,
+    0.4418,
+    164,
+    0.4139
+   ],
+   [
+    73.8,
+    0.3328,
+    100,
+    0.3873
+   ],
+   [
+    92.0,
+    0.3909,
+    57,
+    0.3662
+   ],
+   [
+    118.7,
+    0.2325,
+    53,
+    0.3432
+   ],
+   [
+    150.2,
+    0.1556,
+    44,
+    0.3233
+   ],
+   [
+    187.7,
+    0.144,
+    33,
+    0.3055
+   ],
+   [
+    250.8,
+    0.2062,
+    45,
+    0.2837
+   ],
+   [
+    324.7,
+    0.1458,
+    34,
+    0.2657
+   ]
+  ]
+ },
+ "snpp_outage_days": 20,
+ "aqua_outage_days": 0
+}

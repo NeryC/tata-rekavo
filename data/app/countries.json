@@ -42,6 +42,27 @@
     -16.37,
     -60.96
    ]
+  },
+  {
+   "iso3": "URY",
+   "path": "URY/",
+   "area": "uruguay",
+   "name": {
+    "en": "Uruguay",
+    "es": "Uruguay"
+   },
+   "bbox": [
+    -58.5,
+    -35,
+    -53,
+    -30
+   ],
+   "tz": "America/Montevideo",
+   "tzCity": "Montevideo",
+   "example": [
+    -31.7,
+    -55.98
+   ]
   }
  ]
 }
