@@ -37,6 +37,24 @@ Derived files, built with `python firms_pipeline.py build-regions --country BOL 
 - `data/app/BOL/regions.json` (not from geoBoundaries: from `biomes_latam.npz`, below): the grid cells of each factor region (biome),
   used by the app for the region presets. A cell belongs to the biome of most of its 25 0.05-degree raster cells.
 
+## ecu_adm1.geojson
+
+Ecuador first-level administrative boundaries (24 provinces, Galápagos included in the file).
+
+- Source: geoBoundaries gbOpen, ECU ADM1, `simplifiedGeometryGeoJSON` file (the link returned by the API), kept as downloaded
+  by `fetch_boundaries` (410,945 bytes; properties `shapeName`, `shapeISO`, `shapeID`, `shapeGroup`, `shapeType`).
+- API: https://www.geoboundaries.org/api/current/gbOpen/ECU/ADM1/
+- Retrieved: 2026-11-15
+- License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+- Attribution: Runfola, D. et al. (2020) geoBoundaries: A global database of political administrative boundaries.
+  PLoS ONE 15(4): e0231866. https://doi.org/10.1371/journal.pone.0231866
+
+Derived files, built with `python firms_pipeline.py build-regions --country ECU --out data/app/ECU`: `departments.json` (23 mainland
+provinces: Galápagos is left out through `departments.drop` in `countries.json`, the islands lie outside the grid; display names with
+accents, ASCII slugs as ids; with `departments.mask_cells` every 0.1-degree grid cell that holds a cell of the country mask is assigned to
+the province containing its centre, so provinces add up to the country when current.json brings hotspots to a cell the archives never saw)
+and `regions.json` (from `biomes_latam.npz`: moist forests, dry forests, highlands, mangroves).
+
 ## per_adm1.geojson
 
 Peru first-level administrative boundaries (26 features: 24 departments, El Callao and the Metropolitan Municipality of Lima).
