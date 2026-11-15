@@ -69,7 +69,7 @@ Usá los mismos comandos que para Bolivia, Uruguay y Perú (README, sección "Mo
 4. Sumá en `app/src/i18n.ts` las etiquetas de los biomas nuevos, en `countries_index.mjs` la línea de `EXTRA`, los pasos en el workflow, tu sección en el README y la fuente de los límites en "Space Agency Partner & Other Data".
 5. Un commit por paso (`data: <País>`, `test: ...`, `ci: ...`). Probalo en la app antes de abrir el PR.
 
-Alcance: **solo Sudamérica.** México, Centroamérica y el Caribe están fuera.
+Alcance: **solo Sudamérica.**
 
 ## 5. Entorno y tests
 
