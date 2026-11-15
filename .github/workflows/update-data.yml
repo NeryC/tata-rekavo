@@ -56,6 +56,12 @@ jobs:
           FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
         run: python firms_pipeline.py fetch-current --country URY --out data/app/URY
 
+      - name: Fetch current FIRMS data (Peru)
+        continue-on-error: true
+        env:
+          FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+        run: python firms_pipeline.py fetch-current --country PER --out data/app/PER
+
       - name: Save API cache
         if: always()
         uses: actions/cache/save@v4
@@ -71,6 +77,9 @@ jobs:
 
       - name: Validate data contract (Uruguay)
         run: node test_contract.mjs data/app/URY
+
+      - name: Validate data contract (Peru)
+        run: node test_contract.mjs data/app/PER
 
       - name: Commit and push changes
         run: |
