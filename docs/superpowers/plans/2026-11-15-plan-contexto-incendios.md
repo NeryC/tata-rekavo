@@ -8,9 +8,9 @@
 |---|---|---|
 | 1. Claridad de datos | Terminada (PR #31) | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
 | 2. Fecha y procedencia | Terminada (PR #33) | 103 pruebas y compilación correctas; navegador en español/inglés a 320, 375 y 1440 px con Paraguay (GMT-3) y Bolivia (GMT-4). Ventana emergente del foco comprobada: abre con clic o toque y cierra al tocar fuera. |
-| 3. Área quemada | Pendiente | Confirmar acceso, licencia y piloto antes de integrar. |
-| 4. Caso Cerro Corá | Pendiente | Confirmar fuentes, permisos y datos disponibles. |
-| 5. Compartir para verificación | Terminada (rama `feat/compartir-verificacion`) | Enlace `f=lat,lon,hora UTC` con ubicación redondeada a ~1 km; tarjeta para quien lo recibe; 108 pruebas, compilación y navegador a 320 y 1440 px en español e inglés. |
+| 3. Área quemada | Bloqueada (3A investigada) | MapBiomas Fuego Paraguay Colección 1 (1999–2024, Landsat 30 m, CC BY 4.0) solo se descarga por Google Earth Engine; no hay archivos directos ni estadísticas oficiales de área quemada para validar. Requiere una cuenta de Earth Engine. |
+| 4. Caso Cerro Corá | Bloqueada | Requiere permiso de los autores del póster para reutilizar imágenes, fotos y límites; sin permiso, solo un resumen propio con referencia. |
+| 5. Compartir para verificación | Terminada (PR #35) | Enlace `f=lat,lon,hora UTC` con ubicación redondeada a ~1 km; tarjeta para quien lo recibe; 108 pruebas, compilación y navegador a 320 y 1440 px en español e inglés. |
 
 **Copia de trabajo:** rama `feat/contexto-incendios` basada en `origin/main`. Los 15 archivos locales de etapas anteriores coincidían con lo publicado y se guardaron en el respaldo de Git `respaldo de archivos ya publicados`; no había archivos preparados para commit. La configuración `.claude/settings.local.json` se conserva sin modificar.
 
@@ -23,6 +23,12 @@ Actualizar esta tabla al comenzar y terminar cada etapa, con pruebas, PR y bloqu
 **Tecnología existente:** React, TypeScript, Vite, MapLibre, Python, datos estáticos y almacenamiento R2. Respetar `CONTRIBUTING.md`: rama y PR por etapa, sin cambios directos a `main`.
 
 **Alcance:** Paraguay primero; español e inglés; escritorio y móvil. Mantener el funcionamiento de Bolivia, Ecuador, Perú y Uruguay, así como los enlaces compartidos, las descargas y las capas actuales.
+
+## Hallazgos del 15/11/2026
+
+**MapBiomas Fuego Paraguay (etapa 3A).** Colección 1, 1999–2024, productos anual, mensual, acumulado y frecuencia, Landsat 30 m; en el producto anual 1 = quemado, 0 = no quemado. Licencia CC BY 4.0 («uso público, abierto y gratuito, sujetos a citación»); falta el texto exacto de cita. La página de descargas solo enlaza la plataforma en línea; los datos están en Earth Engine, por ejemplo `projects/mapbiomas-public/assets/paraguay/fire/collection1/mapbiomas_paraguay_fire_collection1_annual_burned_v1` y `..._monthly_burned_v1` (confirmar en Earth Engine). Las estadísticas publicadas solo cubren cobertura y transiciones, no área quemada. Para validar el piloto habrá que comparar con la plataforma oficial o con MODIS MCD64A1. [Descargas](https://paraguay.mapbiomas.org/descargas/mapbiomas-fuego/).
+
+**Tierras Indígenas del Paraguay (posible mejora de la capa indígena).** El visor tierrasindigenas.org.py usa la capa pública `comunidades_indigenas_08_02_2024` (usuario de ArcGIS `fapi2018`): 846 polígonos con comunidad, pueblo, familias, situación de titulación, departamento, distrito, superficie legal y fuente; última edición 06/06/2024. No declara licencia ni cita. No usarla hasta tener autorización escrita de FAPI con licencia y forma de cita. Sus alertas de incendios son VIIRS de NASA, las mismas que ya usa Tata Rekavo.
 
 ## Principios y límites
 
