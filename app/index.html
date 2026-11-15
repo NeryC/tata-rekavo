@@ -3,9 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Is this fire normal? 24 years of harmonized NASA MODIS + VIIRS fire hotspots for South America: Paraguay and Bolivia." />
+    <meta name="description" content="Is this fire normal? 24 years of harmonized NASA MODIS + VIIRS fire hotspots for South America: Paraguay, Bolivia, Peru, Uruguay and Ecuador." />
     <title>Tata Rekavo · Is this fire normal?</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23c9461a'/><circle cx='16' cy='16' r='6' fill='%23fde5c8'/></svg>" />
+    <script>
+      // Paraguay (the default country) starts fetching its grid while the app's JavaScript downloads
+      (function () {
+        var c = new URLSearchParams(location.search).get("country");
+        if (c && c.toUpperCase() !== "PRY") return;
+        var l = document.createElement("link");
+        l.rel = "preload"; l.as = "fetch"; l.crossOrigin = "anonymous"; l.href = "/grid.json";
+        document.head.appendChild(l);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
