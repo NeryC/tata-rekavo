@@ -11,6 +11,8 @@ Subcommands
   build-frp      Harmonized Fire Radiative Power (MW per cell-month, VIIRS S-NPP-equivalent) + its own validation (experimental)
   fetch-current  Pull recent months from the FIRMS Area API (needs a free MAP_KEY); best VIIRS product per day
   build-regions  Department boundaries (geoBoundaries ADM1) and which 0.1-degree grid cells belong to each department
+  build-context  Fire statistics per protected area (WDPA): monthly harmonized hotspots and FRP inside each area; statistics only,
+                 never geometry (WDPA terms forbid publishing downloadable WDPA data or spatial derivatives)
 
 Method (short)
   Unit: "VIIRS S-NPP-equivalent hotspots".
@@ -1211,6 +1213,173 @@ def cmd_build_regions(args):
 
 
 # ----------------------------------------------------------------------------- main
+# ----------------------------------------------------------------------------- build-context (protected areas)
+WDPA_SOURCE = "WDPA/WD-OECM Nov 2026 (UNEP-WCMC & IUCN)"
+WDPA_CITATION = ("UNEP-WCMC and IUCN (2026), Protected Planet: The World Database on Protected Areas (WDPA) and World Database on "
+                 "Other Effective Area-based Conservation Measures (WD-OECM) [Online], November 2026, Cambridge, UK: UNEP-WCMC and IUCN. "
+                 "Available at: www.protectedplanet.net.")
+WDPA_TERMS = "Only fire statistics per protected area are published; no WDPA geometry or derived spatial data"
+CONTEXT_UNIT = ("n = VIIRS S-NPP-equivalent hotspots per month (2002-07..2025-12 harmonized archive; 2026 observed VIIRS, weight 1); "
+                "frp = sum of harmonized Fire Radiative Power in MW per month (2026 observed); m = month index as in grid.json")
+CONTEXT_OVERLAP_NOTE = ("departments / regions of an area = those with at least one 0.1-degree grid-cell centre inside the area "
+                        "or at least one hotspot inside the area; hotspots count in every area that contains them, zones count the "
+                        "union of areas (each hotspot once)")
+
+
+def _fix_mojibake(text):
+    """mapshaper 0.6.102 mis-decodes the UTF-8 DBF names of the WDPA shapefiles, so the prep step reads them as latin1
+    (UTF-8 bytes seen as latin1 characters); undo that. Text that is already clean is returned unchanged."""
+    if not isinstance(text, str):
+        return text
+    try:
+        return text.encode("latin1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
+def _geom_contains(geom, lon, lat):
+    """Boolean mask of the points (lon, lat) inside a GeoJSON Polygon/MultiPolygon (holes excluded; bbox prefilter)."""
+    from matplotlib.path import Path as MPath
+    lon, lat = np.asarray(lon, dtype=float), np.asarray(lat, dtype=float)
+    out = np.zeros(len(lon), dtype=bool)
+    for rings in _geom_polygons(geom):
+        ring = np.asarray(rings[0], dtype=float)
+        cand = np.flatnonzero((lon >= ring[:, 0].min()) & (lon <= ring[:, 0].max()) & (lat >= ring[:, 1].min()) & (lat <= ring[:, 1].max()))
+        if not len(cand):
+            continue
+        pts = np.column_stack([lon[cand], lat[cand]])
+        m = MPath(ring).contains_points(pts)
+        for hole in rings[1:]:
+            m &= ~MPath(np.asarray(hole, dtype=float)).contains_points(pts)
+        out[cand[m]] = True
+    return out
+
+
+def _month_series(m, n, frp):
+    """Monthly sums as {"m", "n", "frp"}, rounded to 0.1; only months where n or frp is > 0 after rounding."""
+    m = np.asarray(m, dtype=np.int64)
+    if not len(m):
+        return {"m": [], "n": [], "frp": []}
+    size = int(m.max()) + 1
+    sn = np.round(np.bincount(m, weights=np.asarray(n, dtype=float), minlength=size), 1)
+    sf = np.round(np.bincount(m, weights=np.asarray(frp, dtype=float), minlength=size), 1)
+    keep = np.flatnonzero((sn > 0) | (sf > 0))
+    return {"m": [int(k) for k in keep], "n": [float(sn[k]) for k in keep], "frp": [float(sf[k]) for k in keep]}
+
+
+def context_stats(h, areas, country_id, centres=None):
+    """Fire statistics per protected area. No geometry leaves this function.
+
+    h: hotspot frame [latitude, longitude, m, n, frp, region, dept] (n / frp = harmonized weights; dept may be None).
+    areas: [{"id": str, "geometry": GeoJSON Polygon|MultiPolygon}].
+    centres: optional grid-cell centres {"lon", "lat", "dept", "region"} (parallel arrays) used for the overlap lists.
+    Returns {"areas": {id: {m, n, frp, departments, regions}}, "zones": {zone: {m, n, frp}}}; the zones (country, each
+    region, each department) total the UNION of the areas, i.e. every hotspot once however many areas contain it."""
+    lon, lat = h.longitude.to_numpy(dtype=float), h.latitude.to_numpy(dtype=float)
+    m_all, n_all, f_all = h.m.to_numpy(), h.n.to_numpy(dtype=float), h.frp.to_numpy(dtype=float)
+    in_any = np.zeros(len(h), dtype=bool)
+    res = {}
+    for a in areas:
+        inside = _geom_contains(a["geometry"], lon, lat)
+        in_any |= inside
+        s = _month_series(m_all[inside], n_all[inside], f_all[inside])
+        deps = set(h.dept[inside].dropna().astype(str))
+        regs = set(h.region[inside].dropna().astype(str))
+        if centres is not None and len(centres["lon"]):
+            c_in = _geom_contains(a["geometry"], centres["lon"], centres["lat"])
+            deps |= {str(d) for d in np.asarray(centres["dept"], dtype=object)[c_in] if d is not None and d == d}
+            regs |= {str(r) for r in np.asarray(centres["region"], dtype=object)[c_in] if r is not None and r == r}
+        res[a["id"]] = {**s, "departments": sorted(deps), "regions": sorted(regs)}
+    u = h[in_any]
+    zones = {country_id: _month_series(u.m, u.n, u.frp)}
+    for col in ("region", "dept"):
+        for z, g in u.groupby(col):
+            zones[str(z)] = _month_series(g.m, g.n, g.frp)
+    return {"areas": res, "zones": zones}
+
+
+def _harmonized_hotspots(cfg, data_dir, current_csv):
+    """Every vegetation-fire hotspot with its harmonized count weight `n` and harmonized FRP weight `frp`, from the archives
+    (same loader, outage rules and factors as build / build-frp), plus the observed 2026 months of current_hotspots.csv
+    (weight 1, FRP as observed). Returns (frame[latitude, longitude, m, n, frp, region], last month "YYYY-MM")."""
+    a = load_archives(data_dir, cfg.firms_name)
+    v = vegetation(a).copy()
+    v["region"] = region_of(v.latitude.values, v.longitude.values, cfg)
+    v["m"] = month_index(v.year.values, v.month.values)
+    flags = daily_flags(v)
+    f, _ = compute_factors(v, flags, regions=cfg.region_names)
+    v["n"], _ = harmonized_weights(v, flags, f)
+    ff, _ = compute_factors(v, flags, value_col="frp", regions=cfg.region_names)
+    v["frp"], _ = harmonized_weights(v, flags, ff, value_col="frp")
+    last_archive = int(v.m.max())
+    v = v[(v.m >= 0) & ((v.n > 0) | (v.frp > 0))][["latitude", "longitude", "m", "n", "frp", "region"]]
+    through = "%04d-%02d" % index_to_ym(last_archive)
+    if os.path.exists(current_csv):
+        c = pd.read_csv(current_csv, dtype={"acq_time": str, "confidence": str, "version": str, "satellite": str})
+        if "type" in c.columns:
+            c = c[c["type"].isna() | (c["type"] == 0)]
+        d = pd.to_datetime(c.acq_date)
+        keep = (d > pd.Timestamp(CALIB_END)).to_numpy()
+        c, d = c[keep], d[keep]
+        if len(c):
+            cur = pd.DataFrame({"latitude": c.latitude.to_numpy(dtype=float), "longitude": c.longitude.to_numpy(dtype=float),
+                                "m": month_index(d.dt.year.values, d.dt.month.values), "n": 1.0,
+                                "frp": pd.to_numeric(c.frp, errors="coerce").fillna(0.0).to_numpy(dtype=float)})
+            cur["region"] = region_of(cur.latitude.values, cur.longitude.values, cfg)
+            v = pd.concat([v, cur], ignore_index=True)
+            through = "%04d-%02d" % index_to_ym(int(cur.m.max()))
+    else:
+        log(f"{current_csv} missing: statistics end with the archive ({through})")
+    return v.reset_index(drop=True), through
+
+
+def cmd_build_context(args):
+    cfg = load_country(args.country)
+    if not os.path.exists(args.wdpa):
+        sys.exit(f"{args.wdpa} not found. Prepare it from the WDPA download first (mapshaper step): see data/ext/README.md, "
+                 "section 'protected_areas.geojson'. That file stays private (gitignored); only context.json is published.")
+    with open(args.wdpa, encoding="utf-8") as fh:
+        feats = json.load(fh)["features"]
+    areas = [{"id": str(f["properties"]["SITE_ID"]), "geometry": f["geometry"], "props": f["properties"]} for f in feats]
+    dp = os.path.join(args.out, "departments.json")
+    cell_dept = {}
+    if os.path.exists(dp):
+        with open(dp, encoding="utf-8") as fh:
+            cell_dept = {int(cl): d["id"] for d in json.load(fh)["departments"] for cl in d["cells"]}
+    else:
+        log("departments.json missing: no department zones or overlaps")
+    h, through = _harmonized_hotspots(cfg, args.data, os.path.join(args.out, "current_hotspots.csv"))
+    g = cfg.grid
+    r, c, ok = cell_of(h.latitude.values, h.longitude.values, g)
+    cell = np.where(ok, g.index(r, c), -1)
+    h["dept"] = pd.Series(cell).map(cell_dept).to_numpy(dtype=object)
+    ids = sorted(cell_dept)
+    cr, cc = np.divmod(np.array(ids, dtype=np.int64), g.cols)
+    clon, clat = g.lon0 + (cc + 0.5) * g.deg, g.lat0 + (cr + 0.5) * g.deg
+    centres = {"lon": clon, "lat": clat, "dept": np.array([cell_dept[i] for i in ids], dtype=object),
+               "region": np.asarray(region_of(clat, clon, cfg), dtype=object)}
+    log(f"{len(h):,} hotspots, {len(areas)} protected areas")
+    stats = context_stats(h, areas, cfg.area, centres=centres)
+    out_areas = []
+    for a in areas:
+        p, s = a["props"], stats["areas"][a["id"]]
+        out_areas.append({"id": a["id"], "name": _fix_mojibake(p.get("NAME")), "desig": p.get("DESIG_ENG"), "desig_type": p.get("DESIG_TYPE"),
+                          "iucn": p.get("IUCN_CAT"), "departments": s["departments"], "regions": s["regions"],
+                          "m": s["m"], "n": s["n"], "frp": s["frp"]})
+    order = [cfg.area] + cfg.region_names + sorted(set(cell_dept.values()))
+    zones = {z: stats["zones"].get(z, {"m": [], "n": [], "frp": []}) for z in order}
+    doc = {"meta": {"source": WDPA_SOURCE, "citation": WDPA_CITATION, "terms": WDPA_TERMS, "through": through,
+                    "first": "%04d-%02d" % START, "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                    "unit": CONTEXT_UNIT, "overlap_note": CONTEXT_OVERLAP_NOTE},
+           "areas": out_areas, "zones": zones}
+    os.makedirs(args.out, exist_ok=True)
+    out = os.path.join(args.out, "context.json")
+    with open(out + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(doc, fh, separators=(",", ":"), ensure_ascii=False)
+    atomic_replace([out + ".tmp"])
+    log(f"context.json: {len(out_areas)} areas, {len(zones)} zones, through {through}, {os.path.getsize(out):,} bytes")
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -1223,6 +1392,8 @@ def parse_args(argv=None):
     f.add_argument("--offline", action="store_true", help="build current.json from cached windows only, no API calls")
     fr = sp.add_parser("build-frp"); fr.add_argument("--data", default="data/raw"); fr.add_argument("--out", default="data/app")
     sn = sp.add_parser("build-season"); sn.add_argument("--data", default="data/raw"); sn.add_argument("--out", default="data/app")
+    cx = sp.add_parser("build-context"); cx.add_argument("--wdpa", default="data/raw/ext/derived/protected_areas.geojson")
+    cx.add_argument("--data", default="data/raw"); cx.add_argument("--out", default="data/app")
     r = sp.add_parser("build-regions"); r.add_argument("--out", default="data/app"); r.add_argument("--ext", default="data/ext")
     r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/<iso3>_adm1.geojson exists")
     for sub in sp.choices.values():
@@ -1233,7 +1404,8 @@ def parse_args(argv=None):
 def main():
     a = parse_args()
     {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current,
-     "build-regions": cmd_build_regions, "build-season": cmd_build_season, "build-frp": cmd_build_frp}[a.cmd](a)
+     "build-regions": cmd_build_regions, "build-season": cmd_build_season, "build-frp": cmd_build_frp,
+     "build-context": cmd_build_context}[a.cmd](a)
 
 
 if __name__ == "__main__":

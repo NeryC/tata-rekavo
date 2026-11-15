@@ -82,7 +82,7 @@ def test_region_of_unknown_kind_rejected(tmp_path):
 
 def test_every_subcommand_takes_country(monkeypatch):
     seen = {}
-    for name in ["download", "build", "export-hotspots", "validate", "fetch-current", "build-regions", "build-season", "build-frp"]:
+    for name in ["download", "build", "export-hotspots", "validate", "fetch-current", "build-regions", "build-season", "build-frp", "build-context"]:
         monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", name, "--country", "pry"])
         args = firms_pipeline.parse_args()
         seen[name] = args.country
@@ -577,3 +577,146 @@ def test_frp_real_data():
     for idx, m, x in frp["cells"]:
         assert idx in grid_cells
         assert len(m) == len(x) and all(0 <= k < n for k in m) and all(val > 0 for val in x)
+
+
+# ----------------------------------------------------------------------------- build-context (protected-area fire statistics)
+def _hot(rows):
+    """rows = [(lat, lon, m, n, frp, region, dept)] -> hotspot frame as used by context_stats."""
+    import pandas as pd
+    return pd.DataFrame(rows, columns=["latitude", "longitude", "m", "n", "frp", "region", "dept"])
+
+
+def _poly(w, s, e, n, hole=None):
+    rings = [_square(w, s, e, n)]
+    if hole:
+        rings.append(_square(*hole))
+    return {"type": "Polygon", "coordinates": rings}
+
+
+def test_context_hotspot_in_two_overlapping_areas_counts_in_both_but_once_in_zones():
+    areas = [{"id": "A", "geometry": _poly(0, 0, 2, 2)}, {"id": "B", "geometry": _poly(1, 1, 3, 3)}]
+    h = _hot([(1.5, 1.5, 10, 2.0, 5.0, "oriental", "d1"),    # inside A and B
+              (0.5, 0.5, 10, 1.0, 1.0, "oriental", "d1"),    # inside A only
+              (2.5, 2.5, 11, 4.0, 8.0, "oriental", "d2"),    # inside B only
+              (9.0, 9.0, 10, 7.0, 7.0, "oriental", "d1")])   # outside every area
+    out = firms_pipeline.context_stats(h, areas, "paraguay")
+    a, b = out["areas"]["A"], out["areas"]["B"]
+    assert (a["m"], a["n"], a["frp"]) == ([10], [3.0], [6.0])
+    assert (b["m"], b["n"], b["frp"]) == ([10, 11], [2.0, 4.0], [5.0, 8.0])
+    z = out["zones"]["paraguay"]
+    assert (z["m"], z["n"], z["frp"]) == ([10, 11], [3.0, 4.0], [6.0, 8.0])   # the shared hotspot once
+    assert out["zones"]["oriental"] == z
+    assert out["zones"]["d1"]["n"] == [3.0] and out["zones"]["d2"]["n"] == [4.0] and out["zones"]["d2"]["m"] == [11]
+
+
+def test_context_hotspot_outside_adds_nothing():
+    out = firms_pipeline.context_stats(_hot([(9.0, 9.0, 3, 1.0, 1.0, "chaco", "d1")]), [{"id": "A", "geometry": _poly(0, 0, 1, 1)}], "paraguay")
+    assert out["areas"]["A"]["m"] == [] and out["areas"]["A"]["n"] == [] and out["areas"]["A"]["frp"] == []
+    assert out["zones"]["paraguay"]["m"] == []
+
+
+def test_context_polygon_hole_is_excluded_and_multipolygon_supported():
+    hole = {"id": "H", "geometry": _poly(0, 0, 4, 4, hole=(1, 1, 3, 3))}
+    multi = {"id": "M", "geometry": {"type": "MultiPolygon", "coordinates": [[_square(10, 10, 11, 11)], [_square(20, 20, 21, 21)]]}}
+    h = _hot([(2.0, 2.0, 5, 1.0, 1.0, "chaco", None),      # in the hole
+              (0.5, 0.5, 5, 2.0, 2.0, "chaco", None),      # in the ring
+              (20.5, 20.5, 6, 3.0, 3.0, "chaco", None)])   # second part of the multipolygon
+    out = firms_pipeline.context_stats(h, [hole, multi], "paraguay")
+    assert out["areas"]["H"]["n"] == [2.0]
+    assert out["areas"]["M"]["m"] == [6] and out["areas"]["M"]["n"] == [3.0]
+
+
+def test_context_rounds_to_one_decimal_and_drops_zero_months():
+    out = firms_pipeline.context_stats(_hot([(0.5, 0.5, 4, 0.04, 0.03, "chaco", None), (0.5, 0.5, 5, 1.04, 0.0, "chaco", None),
+                                              (0.5, 0.5, 5, 0.3, 2.26, "chaco", None)]), [{"id": "A", "geometry": _poly(0, 0, 1, 1)}], "paraguay")
+    a = out["areas"]["A"]
+    assert a["m"] == [5] and a["n"] == [1.3] and a["frp"] == [2.3]
+
+
+def test_context_overlap_lists_from_hotspots_and_cell_centres():
+    areas = [{"id": "A", "geometry": _poly(0, 0, 2, 2)}]
+    h = _hot([(0.5, 0.5, 1, 1.0, 1.0, "oriental", "d1")])
+    centres = {"lon": np.array([1.5, 1.6, 5.0]), "lat": np.array([1.5, 1.5, 5.0]),
+               "dept": np.array(["d2", "d2", "d3"], dtype=object), "region": np.array(["chaco", "chaco", "oriental"], dtype=object)}
+    a = firms_pipeline.context_stats(h, areas, "paraguay", centres=centres)["areas"]["A"]
+    assert a["departments"] == ["d1", "d2"] and a["regions"] == ["chaco", "oriental"]
+
+
+def _walk(x, path="$"):
+    """Fail on geometry-like keys and on arrays of lon/lat pairs anywhere in a JSON document."""
+    bad_keys = {"geometry", "coordinates", "bbox", "centroid", "lat", "lon", "latitude", "longitude", "lng", "cell_lat", "cell_lon"}
+    if isinstance(x, dict):
+        for k, v in x.items():
+            assert k.lower() not in bad_keys, f"{path}.{k}"
+            _walk(v, f"{path}.{k}")
+    elif isinstance(x, list):
+        for i, e in enumerate(x):
+            assert not (isinstance(e, list) and len(e) >= 2 and all(isinstance(c, (int, float)) for c in e)), f"pair array at {path}[{i}]"
+            _walk(e, f"{path}[{i}]")
+
+
+def test_context_json_walker_catches_coordinates():
+    with pytest.raises(AssertionError):
+        _walk({"areas": [{"geometry": 1}]})
+    with pytest.raises(AssertionError):
+        _walk({"a": [[-57.1, -24.2], [-57.2, -24.3]]})
+    _walk({"areas": [{"m": [1, 2], "n": [1.5, 2.5], "frp": [3.0, 4.0], "departments": ["x"]}]})
+
+
+def test_context_output_has_no_coordinates():
+    areas = [{"id": "A", "geometry": _poly(0, 0, 2, 2)}]
+    h = _hot([(0.5, 0.5, 1, 1.0, 1.0, "oriental", "d1"), (1.5, 1.5, 2, 3.0, 2.0, "oriental", "d1")])
+    out = firms_pipeline.context_stats(h, areas, "paraguay")
+    _walk(json.loads(json.dumps(out)))
+
+
+def test_build_context_is_a_subcommand_and_needs_the_prepared_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "build-context", "--wdpa", str(tmp_path / "nope.geojson"),
+                                                     "--data", str(tmp_path), "--out", str(tmp_path), "--country", "pry"])
+    args = firms_pipeline.parse_args()
+    assert args.country == "pry" and args.wdpa.endswith("nope.geojson")
+    with pytest.raises(SystemExit) as e:
+        firms_pipeline.cmd_build_context(args)
+    assert "data/ext/README.md" in str(e.value)
+    monkeypatch.setattr(firms_pipeline.sys, "argv", ["firms_pipeline.py", "build-context"])
+    d = firms_pipeline.parse_args()
+    assert d.wdpa == "data/raw/ext/derived/protected_areas.geojson" and d.out == "data/app" and d.country == "PRY"
+
+
+def test_context_real_data():
+    import pandas as pd
+    cj = ROOT / "data" / "app" / "context.json"
+    if not cj.exists():
+        pytest.skip("data/app/context.json not present")
+    assert cj.stat().st_size < 1_000_000
+    ctx = json.loads(cj.read_text(encoding="utf-8"))
+    _walk(ctx)
+    meta = ctx["meta"]
+    assert meta["source"].startswith("WDPA/WD-OECM") and "no WDPA geometry" in meta["terms"]
+    assert meta["through"] >= "2026-01" and "UNEP-WCMC" in meta["citation"]
+    names = {a["name"]: a for a in ctx["areas"]}
+    assert "Defensores del Chaco" in names
+    assert "chaco" in names["Defensores del Chaco"]["regions"]
+    assert len({a["id"] for a in ctx["areas"]}) == len(ctx["areas"])
+    for a in ctx["areas"]:
+        assert set(a) >= {"id", "name", "desig", "iucn", "departments", "regions", "m", "n", "frp"}
+        assert len(a["m"]) == len(a["n"]) == len(a["frp"]) and a["m"] == sorted(set(a["m"]))
+        assert all(x > 0 or y > 0 for x, y in zip(a["n"], a["frp"]))
+    assert {"paraguay", "chaco", "oriental"} <= set(ctx["zones"])
+    first = ctx["zones"]["paraguay"]
+    # months index m = grid.json months; 2003..2025 = m 6..281
+    tot = sum(x for m, x in zip(first["m"], first["n"]) if 6 <= m <= 281)
+    s = pd.read_csv(ROOT / "data" / "app" / "series_regions.csv")
+    s = s[(s.area == "paraguay") & s.year.between(2003, 2025)]
+    share = tot / s.harmonized.sum()
+    assert 0.01 < share < 0.60
+    for a in ctx["areas"]:   # no area exceeds the union
+        assert sum(a["n"]) <= sum(first["n"]) + 1
+
+
+def test_fix_mojibake_repairs_utf8_read_as_latin1_and_keeps_clean_text():
+    assert firms_pipeline._fix_mojibake("\u00c3\u0091uguazu") == "\u00d1uguazu"
+    assert firms_pipeline._fix_mojibake("Bah\u00c3\u00ada de Asunci\u00c3\u00b3n") == "Bah\u00eda de Asunci\u00f3n"
+    assert firms_pipeline._fix_mojibake("Defensores del Chaco") == "Defensores del Chaco"
+    assert firms_pipeline._fix_mojibake("Cerro Cor\u00e1") == "Cerro Cor\u00e1"
+    assert firms_pipeline._fix_mojibake(None) is None
