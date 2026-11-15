@@ -43,6 +43,13 @@ jobs:
           FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
         run: python firms_pipeline.py fetch-current --out data/app
 
+      # a Bolivia failure must not hold back the Paraguay update; the contract check below still runs on the Bolivia files
+      - name: Fetch current FIRMS data (Bolivia)
+        continue-on-error: true
+        env:
+          FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+        run: python firms_pipeline.py fetch-current --country BOL --out data/app/BOL
+
       - name: Save API cache
         if: always()
         uses: actions/cache/save@v4
@@ -52,6 +59,9 @@ jobs:
 
       - name: Validate data contract
         run: node test_contract.mjs data/app
+
+      - name: Validate data contract (Bolivia)
+        run: node test_contract.mjs data/app/BOL
 
       - name: Commit and push changes
         run: |
