@@ -13,9 +13,17 @@ const csv = readFileSync(join(dir, "series_regions.csv"), "utf8").trim().split("
 let fails = 0;
 const check = (cond, msg) => { console.log((cond ? "ok   " : "FAIL ") + msg); if (!cond) fails++; };
 
-// 1. whole country (all cells) must equal the pipeline's Paraguay series, month by month
+// Area names come from series_regions.csv: the first area is the whole country, the others are its regions.
+const areas = [...new Set(csv.map((r) => r[0]))];
+const countryArea = areas[0];
+const regionAreas = areas.slice(1);
+const label = (a) => a.charAt(0).toUpperCase() + a.slice(1);
+const countryLabel = label(countryArea);
+console.log(`     area ${countryArea}, ${regionAreas.length} regions, grid ${gridJson.meta.grid.rows}x${gridJson.meta.grid.cols} at ${gridJson.meta.grid.deg} deg`);
+
+// 1. whole country (all cells) must equal the pipeline's country series, month by month
 const all = H.zoneSeries(grid, [...grid.cells.keys()]);
-const py = csv.filter((r) => r[0] === "paraguay");
+const py = csv.filter((r) => r[0] === countryArea);
 let maxDiff = 0;
 for (const r of py) {
   const m = H.indexOf(grid.meta, +r[1], +r[2]);
@@ -23,10 +31,26 @@ for (const r of py) {
 }
 check(maxDiff < 0.002, `country series matches pipeline (max rel diff ${maxDiff.toExponential(2)})`);
 
-// 2. polygon selection: a box over the central Chaco
-const chacoBox = [[-61.5, -23.5], [-59.0, -23.5], [-59.0, -21.0], [-61.5, -21.0], [-61.5, -23.5]];
-const ids = H.cellsInPolygon(grid, chacoBox);
-check(ids.length > 400 && ids.length <= 25 * 25, `polygon selects ${ids.length} cells (box is 25x25 cells)`);
+// 2. polygon selection: a box over the central Chaco (Paraguay) or, for other countries, a box of 10x10 cells
+// centred on the grid cell with the most hotspots
+const gm = gridJson.meta.grid;
+let box, boxName, minCells, side;
+if (countryArea === "paraguay") {
+  box = [[-61.5, -23.5], [-59.0, -23.5], [-59.0, -21.0], [-61.5, -21.0], [-61.5, -23.5]];
+  boxName = "central Chaco box"; minCells = 400; side = 25;
+} else {
+  let best = -1, bestIdx = 0;
+  for (const [idx, , harmonized] of gridJson.cells) {
+    const t = harmonized.reduce((a, b) => a + b, 0);
+    if (t > best) { best = t; bestIdx = idx; }
+  }
+  const lon = gm.lon0 + ((bestIdx % gm.cols) + 0.5) * gm.deg, lat = gm.lat0 + (Math.floor(bestIdx / gm.cols) + 0.5) * gm.deg;
+  const h = 5 * gm.deg;
+  box = [[lon - h, lat - h], [lon + h, lat - h], [lon + h, lat + h], [lon - h, lat + h], [lon - h, lat - h]];
+  boxName = "densest 10x10-cell box"; minCells = 1; side = 10;
+}
+const ids = H.cellsInPolygon(grid, box);
+check(ids.length >= minCells && ids.length <= side * side, `polygon selects ${ids.length} cells (box is ${side}x${side} cells)`);
 const s = H.zoneSeries(grid, ids);
 
 // 3. verdict for a few months
@@ -41,7 +65,7 @@ if (currentJson) {
   const to = currentJson.meta.to, last = grid.nMonths - 1;
   check(last > grid.meta.months.count - 1, `current.json extends the record to ${H.monthOf(grid.meta, last).label} (data to ${to})`);
   for (let m = grid.meta.months.count; m <= last; m++) {
-    for (const [name, sel] of [["Paraguay", all], ["central Chaco box", s]]) {
+    for (const [name, sel] of [[countryLabel, all], [boxName, s]]) {
       const cov = H.monthCoverage(grid.meta, m, currentJson.meta);
       if (cov === 0) { console.log(`     ${H.monthOf(grid.meta, m).label} ${name}: no data fetched yet`); continue; }
       const v = H.verdict(grid, sel.harmonized, m, cov);
@@ -64,16 +88,21 @@ check(H.relativeError(grid.meta, H.indexOf(grid.meta, 2020, 9), 50) === 0, "obse
 const avg = (arr, y0, y1) => { let t = 0, k = 0; for (let m = 0; m < grid.nMonths; m++) { const y = H.monthOf(grid.meta, m).year; if (y >= y0 && y <= y1) { t += arr[m]; k++; } } return t / k; };
 console.log(`     2013-2025 vs 2003-2011: naive x${(avg(all.naive, 2013, 2025) / avg(all.naive, 2003, 2011)).toFixed(2)}, harmonized x${(avg(all.harmonized, 2013, 2025) / avg(all.harmonized, 2003, 2011)).toFixed(2)}`);
 
-// 7. burn history
-const bh = H.decodeBurnHistory(JSON.parse(readFileSync(join(dir, "burn_history.json"), "utf8")));
-let burned = 0; for (let lat = -23.5; lat < -21; lat += 0.01) for (let lon = -61.5; lon < -59; lon += 0.01) if (bh.lastYearBurned(lon, lat)) burned++;
-check(burned > 0, `burn history decodes (${burned} of ~62,500 fine cells in the box burned at least once)`);
+// 7. burn history (optional file: only countries with burn_history in countries.json)
+let bhJson = null;
+try { bhJson = JSON.parse(readFileSync(join(dir, "burn_history.json"), "utf8")); } catch {}
+if (!bhJson) console.log("     note: burn_history.json not found in " + dir + ", skipping burn-history checks");
+else {
+  const bh = H.decodeBurnHistory(bhJson);
+  let burned = 0; for (let lat = -23.5; lat < -21; lat += 0.01) for (let lon = -61.5; lon < -59; lon += 0.01) if (bh.lastYearBurned(lon, lat)) burned++;
+  check(burned > 0, `burn history decodes (${burned} of ~62,500 fine cells in the box burned at least once)`);
+}
 
 // 8. CSV export
 const out = H.seriesToCSV(grid, s);
 check(out.split("\n").length === grid.nMonths + 2, `zone CSV has ${grid.nMonths} rows`);
 
-// 9. departments: the 17 department series add up to the country series
+// 9. departments (optional file): the department series add up to the country series
 let deps = null;
 try { deps = JSON.parse(readFileSync(join(dir, "departments.json"), "utf8")).departments; } catch {}
 if (!deps) console.log("     note: departments.json not found in " + dir + ", skipping department checks");
@@ -85,7 +114,7 @@ else {
     if (all.harmonized[m] <= 100) continue;
     n++; worst = Math.max(worst, Math.abs(sum[m] - all.harmonized[m]) / all.harmonized[m]);
   }
-  check(deps.length === 17 && n > 0 && worst < 0.01, `${deps.length} department series sum to the country series in ${n} months with >100 hotspots (max rel diff ${worst.toExponential(2)})`);
+  check((countryArea !== "paraguay" || deps.length === 17) && deps.length > 0 && n > 0 && worst < 0.01, `${deps.length} department series sum to the country series in ${n} months with >100 hotspots (max rel diff ${worst.toExponential(2)})`);
 }
 
 // 10. harmonized FRP (experimental, optional file): same cell and month index as grid.json
@@ -98,7 +127,7 @@ else {
   const okCells = frp.cells.every(([idx, m, x]) => gridCells.has(idx) && m.length === x.length && m.every((k) => k >= 0 && k < nm) && x.every((y) => y > 0));
   const lo = frp.meta.validation.leave_one_year_out;
   check(okCells && frp.meta.months.count === nm, `frp.json: ${frp.cells.length} cells on the grid.json index, ${nm} months`);
-  console.log(`     FRP leave-one-year-out mdape: Paraguay ${lo.paraguay.mdape_pct}%, Chaco ${lo.chaco.mdape_pct}%, Oriental ${lo.oriental.mdape_pct}%` +
+  console.log(`     FRP leave-one-year-out mdape: ${Object.entries(lo).map(([k, v]) => `${k} ${v.mdape_pct}%`).join(", ")}` +
     (frp.meta.experimental ? " (experimental)" : ""));
 
   // the decoded country FRP series is the sum of frp.json (plus current.json FRP when it carries it)
@@ -113,7 +142,7 @@ else {
   const missing = [...fgrid.noData].sort((a, b) => a - b).map((m) => H.monthOf(fgrid.meta, m).label);
   console.log(`     FRP months without data in current.json: ${missing.length ? missing.join(", ") : "none"}`);
   const vf = H.verdict(fgrid, fall.harmonized, H.indexOf(fgrid.meta, 2024, 9));
-  console.log(`     FRP Sep 2024 Paraguay: ${vf.value.toFixed(0)} MW vs median ${vf.median.toFixed(0)} -> x${vf.ratio.toFixed(2)} ${vf.class.label}`);
+  console.log(`     FRP Sep 2024 ${countryLabel}: ${vf.value.toFixed(0)} MW vs median ${vf.median.toFixed(0)} -> x${vf.ratio.toFixed(2)} ${vf.class.label}`);
 }
 
 process.exit(fails ? 1 : 0);
