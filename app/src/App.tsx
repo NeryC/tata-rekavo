@@ -173,8 +173,9 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const presetIds = useMemo(() => [country.area, ...regions.ids], [country.area, regions]);
   // display names: the country, Paraguay's regions and the biomes from i18n; otherwise the label in the data, or the id
   const metaLabels = (countGrid?.meta.regions?.labels ?? {}) as Record<string, string>;
-  const zoneName = (id: string) => (id === country.area ? countryName : i18n.t.zones[id] ?? metaLabels[id] ?? id);
-  const zoneIn = (id: string) => (id === country.area ? countryName : i18n.t.zoneIn[id] ?? zoneName(id));
+  // a biome can read differently per country ("ISO3:biome-id" keys win over the shared "biome-id" ones)
+  const zoneName = (id: string) => (id === country.area ? countryName : i18n.t.zones[`${country.iso3}:${id}`] ?? i18n.t.zones[id] ?? metaLabels[id] ?? id);
+  const zoneIn = (id: string) => (id === country.area ? countryName : i18n.t.zoneIn[`${country.iso3}:${id}`] ?? i18n.t.zoneIn[id] ?? zoneName(id));
 
   const department = useMemo(
     () => (zoneKind === "department" && departmentId ? departments?.departments.find((d) => d.id === departmentId) ?? null : null),
@@ -374,7 +375,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const monthLong = i18n.monthLong(selMonth);
   const monthsDesc = Array.from({ length: grid.nMonths }, (_, m) => m).reverse();
   const val = meta.validation?.leave_one_year_out;
-  const valRows = H.validationSummary(meta, country.area).rows;
+  // a country with a single biome has no region rows of its own: that row would repeat the country's
+  const valRows = H.validationSummary(meta, country.area).rows.filter((r) => r.area === "country" || regions.ids.includes(r.area));
   const frpOn = active === "frp";
   const experimental = frpOn && meta.experimental === true; // from the data, never inferred from meta.name
   const lastPartial = coverage(last) < 1;

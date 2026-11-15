@@ -32,6 +32,7 @@ const en = {
     "tropical-subtropical-grasslands-savannas-shrublands": "Savannas & Chaco",
     "flooded-grasslands-savannas": "Flooded grasslands (Pantanal)",
     "montane-grasslands-shrublands": "Highlands (Puna/Altiplano)",
+    "URY:tropical-subtropical-grasslands-savannas-shrublands": "Grasslands (campos)",
   } as Record<string, string>,
   zoneIn: {
     paraguay: "Paraguay", chaco: "the Chaco", oriental: "the Oriental region", custom: "your zone",
@@ -40,6 +41,7 @@ const en = {
     "tropical-subtropical-grasslands-savannas-shrublands": "the savannas & Chaco",
     "flooded-grasslands-savannas": "the flooded grasslands (Pantanal)",
     "montane-grasslands-shrublands": "the highlands (Puna/Altiplano)",
+    "URY:tropical-subtropical-grasslands-savannas-shrublands": "the grasslands (campos)",
   } as Record<string, string>,
   countryLabel: "Country",
   cellsArea: (_cells: string, km2: string) => `About ${km2} km²`,
@@ -271,6 +273,7 @@ const es: Dict = {
     "tropical-subtropical-grasslands-savannas-shrublands": "Sabanas y Chaco",
     "flooded-grasslands-savannas": "Pastizales inundables (Pantanal)",
     "montane-grasslands-shrublands": "Altiplano (Puna)",
+    "URY:tropical-subtropical-grasslands-savannas-shrublands": "Campos",
   },
   zoneIn: {
     paraguay: "Paraguay", chaco: "el Chaco", oriental: "la Región Oriental", custom: "tu zona",
@@ -279,6 +282,7 @@ const es: Dict = {
     "tropical-subtropical-grasslands-savannas-shrublands": "las sabanas y el Chaco",
     "flooded-grasslands-savannas": "los pastizales inundables (Pantanal)",
     "montane-grasslands-shrublands": "el Altiplano (Puna)",
+    "URY:tropical-subtropical-grasslands-savannas-shrublands": "los campos",
   },
   countryLabel: "País",
   cellsArea: (_cells, km2) => `Unos ${km2} km²`,
