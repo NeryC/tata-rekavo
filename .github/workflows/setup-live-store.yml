@@ -1,0 +1,48 @@
+name: Set up live data store
+
+# One-off (and safe to re-run): applies the CORS rule and the 90-day retention of daily runs to the R2 bucket.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - name: CORS (open data, read-only - any site may GET the files, including Vercel previews and local development)
+        run: |
+          cat > cors.json <<'EOF'
+          {"CORSRules": [{
+            "AllowedOrigins": ["*"],
+            "AllowedMethods": ["GET", "HEAD"],
+            "AllowedHeaders": ["*"],
+            "MaxAgeSeconds": 86400
+          }]}
+          EOF
+          aws s3api put-bucket-cors --bucket "$BUCKET" --endpoint-url "$ENDPOINT" --cors-configuration file://cors.json
+
+      - name: Retention (daily runs are deleted after 90 days; latest.json is kept)
+        run: |
+          cat > lifecycle.json <<'EOF'
+          {"Rules": [{
+            "ID": "expire-daily-runs",
+            "Status": "Enabled",
+            "Filter": {"Prefix": "daily/"},
+            "Expiration": {"Days": 90}
+          }]}
+          EOF
+          aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --endpoint-url "$ENDPOINT" --lifecycle-configuration file://lifecycle.json
+
+      - name: Show the result
+        run: |
+          aws s3api get-bucket-cors --bucket "$BUCKET" --endpoint-url "$ENDPOINT"
+          aws s3api get-bucket-lifecycle-configuration --bucket "$BUCKET" --endpoint-url "$ENDPOINT"

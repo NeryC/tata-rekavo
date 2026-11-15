@@ -90,6 +90,21 @@ jobs:
       - name: Validate data contract (Ecuador)
         run: node test_contract.mjs data/app/ECU
 
+      # with the live data store on (repository variable DATA_STORE = r2), the daily files go to Cloudflare R2
+      # instead of git, so the repository history stops growing every day; see scripts/publish-live.sh
+      - name: Publish current data to the live store
+        if: vars.DATA_STORE == 'r2'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: bash scripts/publish-live.sh data/app
+
+      - name: Keep the daily files out of git (live store on)
+        if: vars.DATA_STORE == 'r2'
+        run: git checkout -- $(git ls-files 'data/app/current.json' 'data/app/*/current.json' 'data/app/current_hotspots.csv' 'data/app/*/current_hotspots.csv')
+
       - name: Commit and push changes
         run: |
           if [ -z "$(git status --porcelain data/app)" ]; then

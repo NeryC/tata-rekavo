@@ -126,6 +126,16 @@ npm run dev      # http://localhost:5173
 npm run build    # static site in app/dist (deploy app/ on Vercel or any static host)
 ```
 
+### Live data store (daily files outside git)
+
+The daily FIRMS files (`current.json`, `current_hotspots.csv` of every country) change every day. Committing them would grow the repository history by several MB a day, so the daily update can publish them to an object store (Cloudflare R2, S3 API) instead:
+
+- `daily/<stamp>/<ISO3>/current.json` and `current_hotspots.csv`: one folder per run, immutable, gzip-encoded, cached for a year; runs older than 90 days are deleted by a lifecycle rule.
+- `latest.json`: manifest pointing at the last complete run (written last, cached 5 minutes).
+- The site's `data/app/live.json` (`{"base": "https://<public bucket URL>/"}`, or `{"base": null}` to switch it off) tells the app where the store is. The app takes the store's files when they are newer than the ones bundled with the site and falls back to the bundled ones on any failure (`app/src/liveData.ts`).
+
+Turning it on: create an R2 bucket with public read access; add the repository secrets `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token limited to that bucket, Object Read & Write); run the "Set up live data store" workflow once (CORS and retention); set the repository variable `DATA_STORE` to `r2`; put the bucket's public URL in `data/app/live.json`. From then on `scripts/publish-live.sh` uploads the files after the contract checks and the bot no longer commits them. With `DATA_STORE` unset everything works as before.
+
 ## Run it
 
 ```bash
