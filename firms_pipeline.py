@@ -1095,6 +1095,18 @@ def error_model_doc(ec, ep, bstat, sys_by_year, what):
     }
 
 
+def agreement_stat(a_obs, a_pred, classes):
+    """{"spearman", "same_class_pct", "n"} of two anomaly series. Too few zone-months (a biome with little fire) or a constant
+    series (Spearman is NaN, which is not valid JSON) give no statistic: both values None, n kept."""
+    from scipy.stats import spearmanr
+    n = int(len(a_obs))
+    if n < 3:
+        return {"spearman": None, "same_class_pct": None, "n": n}
+    rho = float(spearmanr(a_obs, a_pred)[0])
+    return {"spearman": round(rho, 3) if np.isfinite(rho) else None,
+            "same_class_pct": round(float((classes(a_obs) == classes(a_pred)).mean() * 100), 1) if np.isfinite(rho) else None, "n": n}
+
+
 def cmd_validate(args):
     import matplotlib
     matplotlib.use("Agg")
@@ -1133,11 +1145,7 @@ def cmd_validate(args):
         for col in ["obs", "pred"]:
             t["a_" + col] = t[col] / t.groupby(idx + ["month"])[col].transform("median")
         t = t[t.groupby(idx + ["month"]).obs.transform("median") >= 30].dropna(subset=["a_obs", "a_pred"])
-        if len(t) < 3:   # too few zone-months (a biome with little fire): no agreement statistic
-            agree[k] = {"spearman": None, "same_class_pct": None, "n": int(len(t))}
-            continue
-        agree[k] = {"spearman": round(float(spearmanr(t.a_obs, t.a_pred)[0]), 3),
-                    "same_class_pct": round(float((classes(t.a_obs) == classes(t.a_pred)).mean() * 100), 1), "n": int(len(t))}
+        agree[k] = agreement_stat(t.a_obs, t.a_pred, classes)
 
     # error model: median relative error vs predicted count, pooled over all aggregation levels
     ec, ep, bstat = fit_error_model(pairs.values())
@@ -1584,17 +1592,30 @@ def _dist_to_geom(pt, geom):
     return best
 
 
-def build_departments(geojson, grid, cfg: CountryConfig, report=None):
+def mask_cells(cfg: CountryConfig, mask_json):
+    """Cells of the app grid that hold at least one cell of the country mask (mask.json): where hotspots can appear."""
+    mg = cfg.mask_grid
+    bits = np.unpackbits(np.frombuffer(base64.b64decode(mask_json["bits_b64"]), np.uint8))[: mg.rows * mg.cols]
+    mr, mc = np.divmod(np.nonzero(bits)[0], mg.cols)
+    lat, lon = mg.lat0 + (mr + 0.5) * mg.deg, mg.lon0 + (mc + 0.5) * mg.deg
+    r, c, ok = cell_of(lat, lon, cfg.grid)
+    return {int(x) for x in cfg.grid.index(r[ok], c[ok])}
+
+
+def build_departments(geojson, grid, cfg: CountryConfig, report=None, extra_cells=()):
     """geoBoundaries ADM1 FeatureCollection + grid.json -> list of department dicts
     {id, name, cells, bbox, geometry}. Display names (the source file may lack accents) and merged units
     (Paraguay: Asuncion into Central) come from cfg.departments, keyed by slug; "drop" lists the slugs left out. Grid cells whose centre falls
     outside every polygon (border cells of the 0.1-degree grid vs the simplified outline) are assigned to
     the department with the nearest boundary, provided the centre is within one cell diagonal of it.
+    `extra_cells`: grid cells without archive data that can still receive hotspots (cells of the country mask, see mask_cells):
+    they are assigned like the cells of grid.json, so department series add up to the country series once current.json
+    brings hotspots to a cell the archives never saw.
     If `report` (a dict) is given it receives the coverage before/after that step."""
     names, merge = cfg.departments.get("names"), cfg.departments.get("merge", {})
     drop = set(cfg.departments.get("drop", ()))   # slugs left out (Ecuador: Galapagos, outside the mainland grid)
     g = grid["meta"]["grid"]
-    cell_ids = {int(c[0]) for c in grid["cells"]}
+    cell_ids = {int(c[0]) for c in grid["cells"]} | {int(c) for c in extra_cells}
     units, found = {}, {}
     for ft in geojson["features"]:
         props = ft["properties"]
@@ -1697,7 +1718,12 @@ def cmd_build_regions(args):
     with open(os.path.join(args.out, "grid.json"), encoding="utf-8") as fh:
         grid = json.load(fh)
     rep = {}
-    deps = build_departments(geojson, grid, cfg, rep)
+    mk = os.path.join(args.out, "mask.json")
+    extra = ()
+    if cfg.departments.get("mask_cells") and os.path.exists(mk):   # opt-in: Paraguay's committed departments stay as they are
+        with open(mk, encoding="utf-8") as fh:
+            extra = mask_cells(cfg, json.load(fh))
+    deps = build_departments(geojson, grid, cfg, rep, extra_cells=extra)
     meta = {"source": f"geoBoundaries gbOpen {cfg.iso3} ADM1", "license": "CC BY 4.0",
             "url": GEOBOUNDARIES_API.format(iso3=cfg.iso3, level="ADM1"),
             "retrieved": dt.date.today().isoformat(),

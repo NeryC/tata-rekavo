@@ -321,7 +321,8 @@ def _two_squares_geojson():
 
 def _tiny_country(departments):
     return CountryConfig(iso3="XXX", firms_name="Xxx", bbox=(0, 0, 2, 1), deg=0.5, lat0=0.0, lon0=0.0, rows=2, cols=4,
-                         regions={"kind": "biome", "names": []}, export_hotspots=False, burn_history=False, departments=departments)
+                         regions={"kind": "biome", "names": []}, export_hotspots=False, burn_history=False, departments=departments,
+                         mask={"deg": 0.25, "rows": 4, "cols": 8})
 
 
 def test_departments_drop_leaves_out_units_outside_the_grid():
@@ -332,6 +333,18 @@ def test_departments_drop_leaves_out_units_outside_the_grid():
     # without the drop entry the unexpected unit is still an error (a typo in countries.json must not pass silently)
     with pytest.raises(ValueError, match="galapagos"):
         firms_pipeline.build_departments(_two_squares_geojson(), grid, _tiny_country({"names": {"mainland": "Mainland"}}))
+
+
+def test_departments_cover_mask_cells_without_archive_data():
+    grid = {"meta": {"grid": {"deg": 0.5, "lat0": 0.0, "lon0": 0.0, "rows": 2, "cols": 4}}, "cells": [[0], [1], [4], [5]]}
+    cfg = _tiny_country({"names": {"mainland": "Mainland"}, "drop": ["galapagos"]})
+    bits = np.zeros(4 * 8, bool)
+    bits[0 * 8 + 5] = True      # mask cell (row 0, col 5): centre lat 0.125, lon 1.375 -> app cell 2, which has no archive data
+    bits[1 * 8 + 1] = True      # a mask cell inside app cell 0
+    mask = {"bits_b64": base64.b64encode(np.packbits(bits).tobytes()).decode()}
+    assert firms_pipeline.mask_cells(cfg, mask) == {0, 2}
+    deps = firms_pipeline.build_departments(_two_squares_geojson(), grid, cfg, extra_cells=firms_pipeline.mask_cells(cfg, mask))
+    assert deps[0]["cells"] == [0, 1, 2, 4, 5]
 
 
 def test_departments_real_data():
@@ -363,6 +376,12 @@ DEPARTMENTS = {
             "junin": "Junín", "la-libertad": "La Libertad", "lambayeque": "Lambayeque", "lima": "Lima", "loreto": "Loreto",
             "madre-de-dios": "Madre de Dios", "moquegua": "Moquegua", "pasco": "Pasco", "piura": "Piura", "puno": "Puno",
             "san-martin": "San Martín", "tacna": "Tacna", "tumbes": "Tumbes", "ucayali": "Ucayali"},   # Callao and Lima Province merged into Lima
+    "ECU": {"azuay": "Azuay", "bolivar": "Bolívar", "canar": "Cañar", "carchi": "Carchi", "chimborazo": "Chimborazo",
+            "cotopaxi": "Cotopaxi", "el-oro": "El Oro", "esmeraldas": "Esmeraldas", "guayas": "Guayas", "imbabura": "Imbabura",
+            "loja": "Loja", "los-rios": "Los Ríos", "manabi": "Manabí", "morona-santiago": "Morona Santiago", "napo": "Napo",
+            "orellana": "Orellana", "pastaza": "Pastaza", "pichincha": "Pichincha", "santa-elena": "Santa Elena",
+            "santo-domingo-de-los-tsachilas": "Santo Domingo de los Tsáchilas", "sucumbios": "Sucumbíos", "tungurahua": "Tungurahua",
+            "zamora-chinchipe": "Zamora Chinchipe"},   # mainland only: Galapagos dropped
     "URY": {"artigas": "Artigas", "canelones": "Canelones", "cerro-largo": "Cerro Largo", "colonia": "Colonia", "durazno": "Durazno",
             "flores": "Flores", "florida": "Florida", "lavalleja": "Lavalleja", "maldonado": "Maldonado", "montevideo": "Montevideo",
             "paysandu": "Paysandú", "rio-negro": "Río Negro", "rivera": "Rivera", "rocha": "Rocha", "salto": "Salto",
@@ -377,7 +396,9 @@ def test_departments_real_data_other_countries(iso3):
     if not gj.exists() or not grid_path.exists():
         pytest.skip(f"data/ext/{gj.name} or data/app/{iso3}/grid.json not present")
     grid = json.loads(grid_path.read_text(encoding="utf-8"))
-    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, load_country(iso3))
+    cfg = load_country(iso3)
+    extra = firms_pipeline.mask_cells(cfg, json.loads((grid_path.parent / "mask.json").read_text(encoding="utf-8")))         if cfg.departments.get("mask_cells") else set()
+    deps = firms_pipeline.build_departments(json.loads(gj.read_text(encoding="utf-8")), grid, cfg, extra_cells=extra)
     assert {d["id"]: d["name"] for d in deps} == DEPARTMENTS[iso3]    # slugs without accents, display names with them
     seen = set()
     for d in deps:
@@ -387,7 +408,8 @@ def test_departments_real_data_other_countries(iso3):
         w, s, e, n = d["bbox"]
         assert w < e and s < n
         assert d["geometry"]["type"] == "MultiPolygon"
-    assert seen == {c[0] for c in grid["cells"]}   # every cell with data belongs to exactly one department
+    data = {c[0] for c in grid["cells"]}
+    assert data <= seen <= data | extra   # every cell with data and every mask cell belongs to exactly one department
 
 
 def test_region_cells_bolivia_cover_the_grid_once():
@@ -407,7 +429,7 @@ def test_region_cells_bolivia_cover_the_grid_once():
     assert cell(-11.0, -66.0) in cells["tropical-subtropical-moist-broadleaf-forests"]   # Riberalta, Amazon
 
 
-@pytest.mark.parametrize("iso3", ["PER", "URY"])
+@pytest.mark.parametrize("iso3", ["ECU", "PER", "URY"])
 def test_region_cells_other_countries_cover_the_grid_once(iso3):
     grid_path = ROOT / "data" / "app" / iso3 / "grid.json"
     if not grid_path.exists() or not Path(firms_pipeline.BIOMES_PATH).exists():
@@ -852,3 +874,15 @@ def test_fix_mojibake_repairs_utf8_read_as_latin1_and_keeps_clean_text():
     assert firms_pipeline._fix_mojibake("Defensores del Chaco") == "Defensores del Chaco"
     assert firms_pipeline._fix_mojibake("Cerro Cor\u00e1") == "Cerro Cor\u00e1"
     assert firms_pipeline._fix_mojibake(None) is None
+
+
+# ----------------------------------------------------------------------------- anomaly agreement
+def test_agreement_stat_without_enough_or_varying_months_has_no_statistic():
+    import pandas as pd
+    classes = lambda x: pd.cut(x, [-1, .5, 1.5, 3, 1e9], labels=False)
+    ok = firms_pipeline.agreement_stat(pd.Series([0.4, 1.0, 2.0, 5.0]), pd.Series([0.5, 1.1, 2.2, 4.0]), classes)
+    assert ok["spearman"] == 1.0 and ok["same_class_pct"] == 100.0 and ok["n"] == 4
+    assert firms_pipeline.agreement_stat(pd.Series([1.0, 2.0]), pd.Series([1.0, 2.0]), classes) == {"spearman": None, "same_class_pct": None, "n": 2}
+    flat = firms_pipeline.agreement_stat(pd.Series([1.0, 1.0, 1.0]), pd.Series([0.9, 1.0, 1.1]), classes)   # constant: Spearman is NaN
+    assert flat == {"spearman": None, "same_class_pct": None, "n": 3}
+    json.dumps(flat, allow_nan=False)
