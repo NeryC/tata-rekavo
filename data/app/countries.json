@@ -44,6 +44,27 @@
    ]
   },
   {
+   "iso3": "ECU",
+   "path": "ECU/",
+   "area": "ecuador",
+   "name": {
+    "en": "Ecuador",
+    "es": "Ecuador"
+   },
+   "bbox": [
+    -81.1,
+    -5.1,
+    -75.1,
+    1.5
+   ],
+   "tz": "America/Guayaquil",
+   "tzCity": "Guayaquil",
+   "example": [
+    -0.9,
+    -77.8
+   ]
+  },
+  {
    "iso3": "PER",
    "path": "PER/",
    "area": "peru",
