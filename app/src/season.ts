@@ -61,13 +61,17 @@ export function climatologyFor(
 }
 
 export interface StatusInput { ratio: number; leadDays: number | null; early: boolean }
+/** How today's total compares with the year the median reaches it: a typical year reached this total on `doy` (past),
+ *  only reaches it on `doy` (future), or is within ON_SCHEDULE_DAYS of it (onTime). */
+export type SeasonReach = { when: "past" | "future"; doy: number } | { when: "onTime" };
 export type SeasonSummary =
   | { kind: "early" }
   | { kind: "none" }
-  | { kind: "vs"; dir: "above" | "below" | "same"; pct: number | null; lead: { dir: "ahead" | "behind" | "onTime"; days: number } | null };
+  | { kind: "vs"; dir: "above" | "below" | "same"; pct: number | null; reach: SeasonReach | null };
 
-/** What the status sentence has to say. `cum` and `p50` are today's cumulative count and the median at the same day. */
-export function summarizeSeason(s: StatusInput, cum: number, p50: number): SeasonSummary {
+/** What the status sentence has to say. `cum` and `p50` are today's cumulative count and the median at the same day;
+ *  `doy` is today's day of year. */
+export function summarizeSeason(s: StatusInput, cum: number, p50: number, doy: number): SeasonSummary {
   if (s.early) return { kind: "early" };
   if (cum === 0 && p50 === 0) return { kind: "none" };
   let dir: "above" | "below" | "same" = "same", pct: number | null = null;
@@ -76,10 +80,10 @@ export function summarizeSeason(s: StatusInput, cum: number, p50: number): Seaso
     pct = Math.round(Math.abs(s.ratio - 1) * 100);
     dir = pct === 0 ? "same" : s.ratio > 1 ? "above" : "below";
   }
-  let lead: { dir: "ahead" | "behind" | "onTime"; days: number } | null = null;
+  let reach: SeasonReach | null = null;
   if (s.leadDays !== null && Number.isFinite(s.leadDays)) {
-    const days = Math.abs(s.leadDays);
-    lead = { dir: days < ON_SCHEDULE_DAYS ? "onTime" : s.leadDays > 0 ? "ahead" : "behind", days };
+    const at = Math.min(SEASON_DAYS, Math.max(1, doy + s.leadDays)); // first DOY where the median >= today's total
+    reach = Math.abs(s.leadDays) < ON_SCHEDULE_DAYS ? { when: "onTime" } : { when: s.leadDays > 0 ? "future" : "past", doy: at };
   }
-  return { kind: "vs", dir, pct, lead };
+  return { kind: "vs", dir, pct, reach };
 }

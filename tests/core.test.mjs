@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { doyOf } from "../app/src/season.ts";
 import {
   classify, currentCumulative, decodeGrid, departmentRanking, indexOf, monthOf, seasonStatus, validationSummary, verdict,
 } from "../harmonized.js";
@@ -271,4 +272,16 @@ test("seasonStatus on real data: paraguay doy 200 equal to p50 is ratio 1, withi
   assert.equal(s.band, "within");
   assert.equal(s.leadDays, 0);
   assert.equal(s.early, false);
+});
+
+test("app doyOf indexes the same day as currentCumulative, leap years included", () => {
+  const dates = ["2024-01-01", "2024-02-28", "2024-02-29", "2024-03-01", "2024-12-31", "2025-02-28", "2025-03-01", "2025-12-31"];
+  for (const date of dates) {
+    const year = +date.slice(0, 4);
+    const doy = doyOf(date);
+    const c = currentCumulative([{ date }], year);
+    // the hotspot first shows up at index doy-1 (and every later index), never earlier
+    assert.equal(c[doy - 1], 1, date);
+    assert.equal(doy > 1 ? c[doy - 2] : 0, 0, date);
+  }
 });

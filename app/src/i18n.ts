@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { SeasonSummary } from "./season";
+import { monthDayOf, type SeasonSummary } from "./season";
 
 export type Lang = "en" | "es";
 
@@ -62,22 +62,24 @@ const en = {
   modisTA: "MODIS Terra + Aqua", viirsSnpp: "VIIRS S-NPP",
   chartAria: (a: number, b: number, naive: boolean) => `Hotspots per year ${a}–${b}, ${naive ? "raw sensors stitched together" : "harmonized"}`,
   seasonTitle: (z: string) => `Season so far in ${z}`,
-  seasonAria: (year: number) => `Cumulative hotspots through ${year} against the usual range of 2003–2025`,
-  seasonLegendBand: "Usual range (10th–90th percentile)", seasonLegendMedian: "Median year", seasonToday: "today",
+  seasonAria: (year: number, y0: number | null, y1: number | null) => `Cumulative hotspots through ${year}${y0 === null ? "" : ` against the usual range of ${y0}–${y1}`}`,
+  seasonLegendBand: "Usual range (10th–90th percentile)", seasonLegendMedian: "Median year", seasonLastData: "last data",
   seasonYearCount: (year: number) => `${year} so far`, seasonMedianCount: "Median", seasonRangeCount: "Usual range",
   seasonNoData: "no data", seasonNoDataDay: "no satellite data this day, the curve stays flat",
-  seasonStatus: (s: SeasonSummary) => {
+  seasonStatus: (s: SeasonSummary, date: (doy: number) => string) => {
     if (s.kind === "early") return "Too early in the year to compare with a normal season.";
     if (s.kind === "none") return "No hotspots yet, and the median for this date is also zero.";
+    if (s.dir === "same" && s.reach?.when === "onTime") return "In line with a typical year at this date.";
     const head = s.dir === "same" ? "In line with the usual level at this date"
       : s.pct === null ? "Above the usual level at this date"
       : `${s.pct} % ${s.dir === "above" ? "above" : "below"} the usual level at this date`;
-    if (!s.lead) return `${head}.`;
-    if (s.lead.dir === "onTime") return `${head}; the season is on schedule.`;
-    return `${head}; the season is running ${s.lead.days} days ${s.lead.dir === "ahead" ? "ahead" : "behind"}.`;
+    if (!s.reach) return `${head}.`;
+    if (s.reach.when === "onTime") return `${head}; in line with a typical year.`;
+    return `${head}; a typical year ${s.reach.when === "future" ? "only reaches" : "reached"} this total on ${date(s.reach.doy)}.`;
   },
   seasonNoClim: "No usual curve for this area: it is custom, or has no season history yet. Only this year's curve is shown.",
-  seasonCaption: "Both curves are cumulative hotspots from 1 January, in VIIRS S-NPP-equivalent units. Usual range: 2003–2025.",
+  seasonCaption: "Both curves are cumulative hotspots from 1 January, in VIIRS S-NPP-equivalent units.",
+  seasonCaptionRange: (y0: number, y1: number) => ` Usual range: ${y0}–${y1}.`,
   noteNaive: "Stitching the raw sensors together makes fire look ~3× higher after 2012 — but that jump is the switch to the more sensitive VIIRS sensor, not more fire.",
   noteHarmonized: "One unit for 24 years: MODIS counts before 2012 are translated to what VIIRS would have detected, with a factor per region and calendar month.",
   newTitle: "Fire in new places",
@@ -222,22 +224,24 @@ const es: Dict = {
   modisTA: "MODIS Terra + Aqua", viirsSnpp: "VIIRS S-NPP",
   chartAria: (a, b, naive) => `Focos por año ${a}–${b}, ${naive ? "sensores crudos pegados" : "armonizado"}`,
   seasonTitle: (z) => `Temporada hasta hoy en ${z}`,
-  seasonAria: (year) => `Focos acumulados en ${year} frente al rango habitual de 2003–2025`,
-  seasonLegendBand: "Rango habitual (percentil 10–90)", seasonLegendMedian: "Año mediano", seasonToday: "hoy",
+  seasonAria: (year, y0, y1) => `Focos acumulados hasta ${year}${y0 === null ? "" : ` frente al rango habitual de ${y0}–${y1}`}`,
+  seasonLegendBand: "Rango habitual (percentil 10–90)", seasonLegendMedian: "Año mediano", seasonLastData: "último dato",
   seasonYearCount: (year) => `${year} hasta hoy`, seasonMedianCount: "Mediana", seasonRangeCount: "Rango habitual",
   seasonNoData: "sin datos", seasonNoDataDay: "sin datos de satélite este día, la curva queda plana",
-  seasonStatus: (s) => {
+  seasonStatus: (s, date) => {
     if (s.kind === "early") return "Es muy temprano en el año para comparar con una temporada normal.";
     if (s.kind === "none") return "Todavía no hay focos, y la mediana para esta fecha también es cero.";
+    if (s.dir === "same" && s.reach?.when === "onTime") return "En línea con un año típico a esta fecha.";
     const head = s.dir === "same" ? "En línea con lo normal a esta fecha"
       : s.pct === null ? "Por encima de lo normal a esta fecha"
       : `${s.pct} % ${s.dir === "above" ? "por encima" : "por debajo"} de lo normal a esta fecha`;
-    if (!s.lead) return `${head}.`;
-    if (s.lead.dir === "onTime") return `${head}; la temporada va en fecha.`;
-    return `${head}; la temporada viene ${s.lead.days} días ${s.lead.dir === "ahead" ? "adelantada" : "atrasada"}.`;
+    if (!s.reach) return `${head}.`;
+    if (s.reach.when === "onTime") return `${head}; en línea con un año típico.`;
+    return `${head}; un año típico ${s.reach.when === "future" ? "recién alcanza" : "alcanzó"} este total el ${date(s.reach.doy)}.`;
   },
   seasonNoClim: "No hay curva habitual para esta área: es personalizada o todavía no tiene historia de temporada. Solo se muestra la curva de este año.",
-  seasonCaption: "Ambas curvas son focos acumulados desde el 1 de enero, en unidades equivalentes a VIIRS S-NPP. Rango habitual: 2003–2025.",
+  seasonCaption: "Ambas curvas son focos acumulados desde el 1 de enero, en unidades equivalentes a VIIRS S-NPP.",
+  seasonCaptionRange: (y0, y1) => ` Rango habitual: ${y0}–${y1}.`,
   noteNaive: "Pegar los sensores crudos hace que el fuego parezca ~3 veces mayor después de 2012, pero ese salto es el cambio al sensor VIIRS, más sensible, no más fuego.",
   noteHarmonized: "Una sola unidad para 24 años: los conteos de MODIS antes de 2012 se traducen a lo que habría detectado VIIRS, con un factor por región y mes.",
   newTitle: "Fuego en lugares nuevos",
@@ -347,6 +351,8 @@ export interface I18n {
   monthLong: (month: number) => string;
   monthLabel: (year: number, month: number) => string;
   monthLongLabel: (year: number, month: number) => string;
+  /** a day of the 365-day season calendar as "9 Aug" / "9 de agosto" */
+  doyLabel: (doy: number) => string;
   initials: string[];
 }
 
@@ -362,6 +368,10 @@ export function makeI18n(lang: Lang): I18n {
     monthLongLabel: (y, m) => (lang === "es"
       ? `${MONTHS_LONG.es[m - 1][0].toUpperCase()}${MONTHS_LONG.es[m - 1].slice(1)} de ${y}`
       : `${MONTHS_LONG.en[m - 1]} ${y}`),
+    doyLabel: (doy) => {
+      const { month, day } = monthDayOf(doy);
+      return lang === "es" ? `${day} de ${MONTHS_LONG.es[month - 1]}` : `${day} ${MONTHS_SHORT.en[month - 1]}`;
+    },
     initials: INITIALS[lang],
   };
 }

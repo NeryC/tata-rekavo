@@ -65,35 +65,46 @@ test("climatologyFor maps the zone to its area, custom and unknown to null", () 
   assert.equal(climatologyFor(null, "paraguay", null), null);
 });
 
+test("monthDayOf is the inverse of doyOf over the whole year", () => {
+  for (let d = 1; d <= 365; d++) {
+    const { month, day } = monthDayOf(d);
+    const iso = `2025-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    assert.equal(doyOf(iso), d, iso);
+  }
+  assert.deepEqual(monthDayOf(60), { month: 3, day: 1 });
+  assert.deepEqual(monthDayOf(221), { month: 8, day: 9 });
+});
+
 test("early in the year there is no verdict (Jan 1 case)", () => {
-  const s = summarizeSeason({ ratio: 0, leadDays: null, early: true }, 0, 5);
+  const s = summarizeSeason({ ratio: 0, leadDays: null, early: true }, 0, 5, 1);
   assert.deepEqual(s, { kind: "early" });
 });
 
-test("above the median and ahead of schedule", () => {
-  const s = summarizeSeason({ ratio: 1.28, leadDays: 12, early: false }, 128, 100);
-  assert.deepEqual(s, { kind: "vs", dir: "above", pct: 28, lead: { dir: "ahead", days: 12 } });
+test("below the median: a typical year reached this total earlier (date in the past)", () => {
+  const s = summarizeSeason({ ratio: 0.42, leadDays: -97, early: false }, 55711, 132440, 318);
+  assert.deepEqual(s, { kind: "vs", dir: "below", pct: 58, reach: { when: "past", doy: 221 } });
 });
 
-test("below the median and behind", () => {
-  const s = summarizeSeason({ ratio: 0.6, leadDays: -9, early: false }, 60, 100);
-  assert.deepEqual(s, { kind: "vs", dir: "below", pct: 40, lead: { dir: "behind", days: 9 } });
+test("above the median: a typical year only reaches this total later (date in the future)", () => {
+  const s = summarizeSeason({ ratio: 1.28, leadDays: 12, early: false }, 128, 100, 200);
+  assert.deepEqual(s, { kind: "vs", dir: "above", pct: 28, reach: { when: "future", doy: 212 } });
 });
 
-test("lead under 3 days is on schedule; null lead is omitted", () => {
-  assert.deepEqual(summarizeSeason({ ratio: 1.1, leadDays: 2, early: false }, 11, 10),
-    { kind: "vs", dir: "above", pct: 10, lead: { dir: "onTime", days: 2 } });
-  assert.deepEqual(summarizeSeason({ ratio: 1.1, leadDays: -2, early: false }, 11, 10),
-    { kind: "vs", dir: "above", pct: 10, lead: { dir: "onTime", days: 2 } });
-  assert.equal((summarizeSeason({ ratio: 0.9, leadDays: 3, early: false }, 9, 10) as { lead: { dir: string } }).lead.dir, "ahead");
-  assert.equal((summarizeSeason({ ratio: 1.5, leadDays: null, early: false }, 15, 10) as { lead: unknown }).lead, null);
+test("lead under 3 days is in line with a typical year; null lead is omitted", () => {
+  assert.deepEqual(summarizeSeason({ ratio: 1.1, leadDays: 2, early: false }, 11, 10, 200),
+    { kind: "vs", dir: "above", pct: 10, reach: { when: "onTime" } });
+  assert.deepEqual(summarizeSeason({ ratio: 1.1, leadDays: -2, early: false }, 11, 10, 200),
+    { kind: "vs", dir: "above", pct: 10, reach: { when: "onTime" } });
+  assert.deepEqual((summarizeSeason({ ratio: 0.9, leadDays: -3, early: false }, 9, 10, 200) as { reach: unknown }).reach,
+    { when: "past", doy: 197 });
+  assert.equal((summarizeSeason({ ratio: 1.5, leadDays: null, early: false }, 15, 10, 200) as { reach: unknown }).reach, null);
 });
 
 test("edge ratios: infinite, zero and equal", () => {
-  assert.deepEqual(summarizeSeason({ ratio: Infinity, leadDays: null, early: false }, 4, 0),
-    { kind: "vs", dir: "above", pct: null, lead: null });
-  assert.deepEqual(summarizeSeason({ ratio: 0, leadDays: null, early: false }, 0, 50),
-    { kind: "vs", dir: "below", pct: 100, lead: null });
-  assert.deepEqual(summarizeSeason({ ratio: 0, leadDays: null, early: false }, 0, 0), { kind: "none" });
-  assert.equal((summarizeSeason({ ratio: 1.004, leadDays: 0, early: false }, 100, 100) as { dir: string }).dir, "same");
+  assert.deepEqual(summarizeSeason({ ratio: Infinity, leadDays: null, early: false }, 4, 0, 100),
+    { kind: "vs", dir: "above", pct: null, reach: null });
+  assert.deepEqual(summarizeSeason({ ratio: 0, leadDays: null, early: false }, 0, 50, 100),
+    { kind: "vs", dir: "below", pct: 100, reach: null });
+  assert.deepEqual(summarizeSeason({ ratio: 0, leadDays: null, early: false }, 0, 0, 100), { kind: "none" });
+  assert.equal((summarizeSeason({ ratio: 1.004, leadDays: 0, early: false }, 100, 100, 100) as { dir: string }).dir, "same");
 });

@@ -22,7 +22,7 @@ const COLORS = { now: "#eb6834", median: "#46514a", band: "#6250d6" };
 const W = 440, Hh = 200, L = 44, R = 6, B = 24, T = 12;
 
 export default function SeasonChart({ season, zoneKind, departmentId, hotspots, zone, to, daysWithoutData }: Props) {
-  const { t, num, monthShort } = useI18n();
+  const { t, num, monthShort, doyLabel } = useI18n();
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<{ doy: number; x: number; y: number } | null>(null);
 
@@ -35,7 +35,7 @@ export default function SeasonChart({ season, zoneKind, departmentId, hotspots, 
   const missing = useMemo(() => missingDoys(year, daysWithoutData), [year, daysWithoutData]);
   const status = useMemo(() => {
     if (!clim || today === null) return null;
-    return summarizeSeason(H.seasonStatus(cum, clim, today), cum[today - 1], clim.p50[today - 1]);
+    return summarizeSeason(H.seasonStatus(cum, clim, today), cum[today - 1], clim.p50[today - 1], today);
   }, [clim, cum, today]);
 
   if (today === null) return null;
@@ -95,7 +95,7 @@ export default function SeasonChart({ season, zoneKind, departmentId, hotspots, 
           <span><i style={{ background: COLORS.band, opacity: 0.3 }} />{t.seasonLegendBand}</span>
         </>}
       </div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${Hh}`} role="img" aria-label={t.seasonAria(year)}
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${Hh}`} role="img" aria-label={t.seasonAria(year, clim ? season.meta.years[0] : null, clim ? season.meta.years[1] : null)}
         onPointerMove={locate} onPointerDown={locate}>
         {ticks.map((tk) => (
           <g key={tk}>
@@ -120,7 +120,7 @@ export default function SeasonChart({ season, zoneKind, departmentId, hotspots, 
         <path d={line(cum, today)} fill="none" stroke={COLORS.now} strokeWidth={2.4} strokeLinejoin="round" />
         <line x1={x(today)} x2={x(today)} y1={T} y2={y(0)} className="marker" />
         <text x={x(today) + (x(today) > W * 0.7 ? -4 : 4)} y={T + 9} className="axis"
-          textAnchor={x(today) > W * 0.7 ? "end" : "start"}>{t.seasonToday}</text>
+          textAnchor={x(today) > W * 0.7 ? "end" : "start"}>{t.seasonLastData}</text>
         <circle cx={x(today)} cy={y(cum[today - 1])} r={3.5} fill={COLORS.now} />
         {hover && (
           <g pointerEvents="none">
@@ -136,9 +136,9 @@ export default function SeasonChart({ season, zoneKind, departmentId, hotspots, 
           <b>{tipLines(hover.doy)[0]}</b>{tipLines(hover.doy).slice(1).map((l) => <div key={l}>{l}</div>)}
         </div>
       )}
-      {status && <p className="season-status" aria-live="polite">{t.seasonStatus(status)}</p>}
+      {status && <p className="season-status" aria-live="polite">{t.seasonStatus(status, doyLabel)}</p>}
       {!clim && <p className="note">{t.seasonNoClim}</p>}
-      <p className="note">{t.seasonCaption}</p>
+      <p className="note">{t.seasonCaption}{clim && t.seasonCaptionRange(season.meta.years[0], season.meta.years[1])}</p>
     </div>
   );
 }
