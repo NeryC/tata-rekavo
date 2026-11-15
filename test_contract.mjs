@@ -5,6 +5,7 @@ import { join } from "node:path";
 import * as H from "./harmonized.js";
 import { buildIndex } from "./countries_index.mjs";
 import { validateContext, validateIndigenous } from "./app/src/contextCheck.ts";
+import { validateBurnedArea } from "./app/src/burnedArea.ts";
 
 const dir = process.argv[2] || "data/app";
 const gridJson = JSON.parse(readFileSync(join(dir, "grid.json"), "utf8"));
@@ -206,6 +207,37 @@ for (const [file, validate, label] of [["context.json", validateContext, "protec
   const tm = H.indexOf(grid.meta, through[0], through[1]);
   check(tm >= 0 && tm < grid.nMonths, `${file} ends in ${j.meta.through}, a month of the record`);
   if (file === "indigenous.json") check(j.meta.license === "CC BY-SA 4.0" && Array.isArray(j.meta.contributors) && j.meta.contributors.length > 0 && j.areas.length > 0, `${file} names its license (${j.meta.license}) and ${j.meta.contributors.length} contributors`);
+}
+
+// 14. estimated burned area (burned_area.json, MapBiomas Fuego), optional: hectares only, this country's zones,
+// annual = sum of its months, country = sum of departments, nothing after the collection
+{
+  const b = readOptional("burned_area.json");
+  if (!b) console.log(`     note: burned_area.json not found in ${dir} (the app shows no burned-area block)`);
+  else {
+    check(validateBurnedArea(b) !== null, `burned_area.json validates as the app reads it (${b.source}, ${b.first_year}-${b.last_year}, ${b.unit})`);
+    const deps = (readOptional("departments.json")?.departments ?? []).map((d) => d.id);
+    const zones = Object.keys(b.zones);
+    check(zones[0] === countryArea && zones.slice(1).every((z) => deps.includes(z)) && deps.every((d) => zones.includes(d)), `burned_area.json zones are the country and its ${deps.length} departments`);
+    const years = Array.from({ length: b.last_year - b.first_year + 1 }, (_, i) => b.first_year + i);
+    let badMonths = 0, badSum = 0, after = 0;
+    for (const z of zones) {
+      for (const y of years) {
+        const a = b.zones[z].annual[String(y)];
+        const ms = Array.from({ length: 12 }, (_, i) => b.zones[z].monthly[`${y}-${String(i + 1).padStart(2, "0")}`]);
+        if (a !== null && ms.every((v) => v !== null) && Math.abs(a - ms.reduce((x, v) => x + v, 0)) > 13 + 0.002 * a) badMonths++;
+      }
+      after += Object.keys(b.zones[z].annual).filter((y) => Number(y) > b.last_year).length;
+    }
+    for (const y of years) {
+      const total = b.zones[countryArea].annual[String(y)];
+      const sum = deps.reduce((x, d) => x + (b.zones[d].annual[String(y)] ?? NaN), 0);
+      if (total !== null && Math.abs(total - sum) > 1) badSum++;
+    }
+    check(badMonths === 0, `burned_area.json: every annual figure equals the sum of its months (${badMonths} mismatches)`);
+    check(badSum === 0, `burned_area.json: the country equals the sum of its departments every year (${badSum} mismatches)`);
+    check(after === 0, `burned_area.json has no year after the collection (${b.last_year})`);
+  }
 }
 
 process.exit(fails ? 1 : 0);
