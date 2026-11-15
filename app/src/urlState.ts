@@ -1,9 +1,14 @@
 // Pure codec between the shareable app state and a URL query string.
 // No React, no @core: clamping to the available data range happens in App.
 
+export type BBox = [number, number, number, number]; // [w, s, e, n]
+
 export type ShareState = {
   lang?: "en" | "es";
-  zone?: "paraguay" | "chaco" | "oriental" | "custom" | "department";
+  /** ISO3 of the country (URL param `country`); "PRY", the default, is not written */
+  country?: string;
+  /** the country's own area id ("paraguay"), a factor region id ("chaco", a biome slug), "custom" or "department" */
+  zone?: string;
   dep?: string;
   poly?: number[][]; // [[lon, lat], ...]
   c?: { lat: number; lon: number; r: number };
@@ -16,11 +21,20 @@ export type ShareState = {
 };
 
 const MAX_VERTICES = 120;
-const ZONES = ["paraguay", "chaco", "oriental", "custom", "department"] as const;
+const ZONE_RE = /^[a-z0-9][a-z0-9-]{0,79}$/; // area ids are slugs; App keeps only the presets the country has
+const COUNTRY_RE = /^[A-Z]{3}$/;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
-export function validateCoords(lat: number, lon: number, r: number): boolean {
-  return lat >= -27.7 && lat <= -19.1 && lon >= -62.8 && lon <= -54.1 && r >= 5 && r <= 300;
+export const DEFAULT_COUNTRY = "PRY";
+export const PRY_BBOX: BBox = [-62.8, -27.7, -54.1, -19.1];
+/** bbox of a country, undefined when unknown; without the countries index only Paraguay is known */
+export type BBoxOf = (iso3: string) => BBox | undefined;
+const pryOnly: BBoxOf = (iso3) => (iso3 === DEFAULT_COUNTRY ? PRY_BBOX : undefined);
+
+/** A point inside the country's bbox (Paraguay by default) and a radius between 5 and 300 km. */
+export function validateCoords(lat: number, lon: number, r: number, bbox: BBox = PRY_BBOX): boolean {
+  const [w, s, e, n] = bbox;
+  return lat >= s && lat <= n && lon >= w && lon <= e && r >= 5 && r <= 300;
 }
 
 const num = (n: number): string => String(Number(n.toFixed(3)));
@@ -34,6 +48,7 @@ function decimate(poly: number[][]): number[][] {
 export function encodeState(s: ShareState): string {
   const p = new URLSearchParams();
   if (s.lang) p.set("lang", s.lang);
+  if (s.country && s.country !== DEFAULT_COUNTRY) p.set("country", s.country);
   if (s.zone && s.zone !== "paraguay") p.set("z", s.zone);
   if (s.dep) p.set("dep", s.dep);
   if (s.poly && s.poly.length >= 3) {
@@ -58,15 +73,28 @@ const parseNums = (s: string, n: number): number[] | null => {
   return out.every(Number.isFinite) ? out : null;
 };
 
-export function decodeState(search: string): ShareState {
+/** The country a link asks for: its `country` param (ISO3, any case), or Paraguay when there is none. */
+export function countryOf(search: string): string {
+  const c = new URLSearchParams(search).get("country")?.toUpperCase();
+  return c && COUNTRY_RE.test(c) ? c : DEFAULT_COUNTRY;
+}
+
+/**
+ * @param bboxOf bbox of a country, for the `c` (point + radius) check; a link for a country without a known bbox loses `c`.
+ *   Default: Paraguay only.
+ */
+export function decodeState(search: string, bboxOf: BBoxOf = pryOnly): ShareState {
   const p = new URLSearchParams(search);
   const out: ShareState = {};
 
   const lang = p.get("lang");
   if (lang === "en" || lang === "es") out.lang = lang;
 
+  const country = countryOf(search);
+  if (p.has("country") && country !== DEFAULT_COUNTRY) out.country = country;
+
   const z = p.get("z");
-  if (z && (ZONES as readonly string[]).includes(z)) out.zone = z as ShareState["zone"];
+  if (z && ZONE_RE.test(z)) out.zone = z;
 
   const dep = p.get("dep");
   if (dep) out.dep = dep;
@@ -80,7 +108,8 @@ export function decodeState(search: string): ShareState {
   const c = p.get("c");
   if (c) {
     const v = parseNums(c, 3);
-    if (v && validateCoords(v[0], v[1], v[2])) out.c = { lat: v[0], lon: v[1], r: v[2] };
+    const bbox = bboxOf(country);
+    if (v && bbox && validateCoords(v[0], v[1], v[2], bbox)) out.c = { lat: v[0], lon: v[1], r: v[2] };
   }
 
   const m = p.get("m");

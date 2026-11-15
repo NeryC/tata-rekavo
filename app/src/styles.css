@@ -55,6 +55,13 @@ p { margin: 0; }
 .manual-link { position: absolute; right: 22px; top: calc(100% + 8px); z-index: 20; display: grid; gap: 4px; width: min(420px, calc(100vw - 28px)); padding: 10px 12px; border-radius: 8px; background: #f2f4f1; color: var(--night); font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
 .manual-link input { width: 100%; min-height: 36px; padding: 0 8px; border: 1px solid var(--edge); border-radius: 6px; background: #fff; font-size: 14px; font-weight: 400; }
 .lang { display: inline-flex; border: 1px solid #6b776e; border-radius: 8px; overflow: hidden; }
+/* country selector: a quiet select on the dark header (native list, so it works with keyboard and screen readers) */
+.country { min-height: 36px; padding: 0 28px 0 10px; border: 1px solid #6b776e; border-radius: 8px; font-size: 14px; color: #f2f4f1;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23f2f4f1' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  appearance: none; -webkit-appearance: none; cursor: pointer; }
+.country:hover { border-color: #f2f4f1; }
+.country option { color: var(--ink); background: #ffffff; }
+.country-brand { display: none; }
 .lang button { min-width: 40px; min-height: 36px; background: transparent; border: 0; color: #b9c4bb; font-size: 14px; }
 .lang button.on { background: #f2f4f1; color: var(--night); font-weight: 700; }
 
@@ -85,6 +92,10 @@ details p { margin-top: 6px; color: var(--ink-2); max-width: 62ch; }
 .seg.small button { min-height: 34px; padding: 0 11px; font-size: 14px; }
 .seg.area { display: flex; width: 100%; }
 .seg.area button { flex: 1 1 0; padding: 0 8px; }
+/* more than three presets (biome countries): the country on its own row, the regions two per row, wrapping */
+.seg.area.many { display: grid; grid-template-columns: 1fr 1fr; }
+.seg.area.many button { padding: 6px 8px; white-space: normal; line-height: 1.25; }
+.seg.area.many button:first-child, .seg.area.many button:last-child:nth-child(even) { grid-column: 1 / -1; }
 /* tools to build a custom area: a different kind of control, so a different look */
 .area-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-top: 12px; }
 .tools-label { grid-column: 1 / -1; font-size: 14px; color: var(--ink-2); }
@@ -226,6 +237,9 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
   .panel { padding: 0 18px 24px; }
   .top p { display: none; }
   .top .updated { display: block; min-width: 0; margin-top: 1px; font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+  /* the subtitle is hidden here: the country selector takes its place under the title, leaving the nav as it was */
+  .country-nav { display: none; }
+  .country-brand { display: block; margin-top: 6px; min-height: 32px; font-size: 14px; }
   .seg.area button { font-size: 15px; }
   .v-ratio { font-size: 56px; }
 }

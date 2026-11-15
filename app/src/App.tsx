@@ -13,15 +13,17 @@ import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadContext, loadData, loadDepartments, loadFrp, loadSeason, regionOfCell, sourceOf, type AppData, type DepartmentsFile,
+  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadSeason, PARAGUAY, regionPresets, sourceOf,
+  type AppData, type CountryInfo, type DepartmentsFile,
 } from "./data";
-import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
+import { countryOf, decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
 import { indexToMonth, planRestore } from "./shareRestore";
 import type { ContextFile, Grid } from "@core";
 import type { SeasonFile } from "./season";
 import { I18nContext, initialLang, makeI18n, saveLang, type Lang, type Metric } from "./i18n";
 
-type ZoneKind = "paraguay" | "chaco" | "oriental" | "custom" | "department";
+/** the country's own area id ("paraguay", "bolivia"), one of its region presets ("chaco", a biome id), "custom" or "department" */
+type ZoneKind = string;
 const CLASS_STYLE: Record<string, { icon: string }> = {
   low: { icon: "↓" }, normal: { icon: "≈" }, high: { icon: "↑" }, extreme: { icon: "▲" },
 };
@@ -33,8 +35,50 @@ const MAX_ROWS = 1_500_000;
 // a typical month under 100 MW is too little fire to rank by ratio (counts use 10 hotspots, MW run about ten times higher)
 const FRP_LOW_SIGNAL_MEDIAN = 100;
 
+/**
+ * The country comes from the link (`country=BOL`); a link without it is Paraguay, exactly as before. Paraguay starts at once;
+ * another country waits for the countries index (countries.json) and falls back to Paraguay when the index is missing or does
+ * not list it. Switching country remounts the country view, so every per-country state starts fresh.
+ */
 export default function App() {
   const [lang, setLang] = useState<Lang>(initialLang);
+  const wanted = useMemo(() => countryOf(window.location.search), []);
+  const [countries, setCountries] = useState<CountryInfo[] | null>(null); // null until loaded, or when it failed: no selector
+  const [country, setCountry] = useState<CountryInfo | null>(wanted === PARAGUAY.iso3 ? PARAGUAY : null);
+  useEffect(() => {
+    void loadCountries().then((idx) => {
+      const list = idx?.countries ?? null;
+      setCountries(list);
+      setCountry((c) => c ?? list?.find((x) => x.iso3 === wanted) ?? PARAGUAY);
+    });
+  }, [wanted]);
+  const switchCountry = (next: CountryInfo, month: string | null) => {
+    // the new country starts on its whole area, keeping the language and the month (the view checks it against its data)
+    const s: ShareState = { lang, country: next.iso3 };
+    if (month) s.m = month;
+    try { window.history.replaceState(null, "", `?${encodeState(s)}`); } catch { /* sandboxed */ }
+    setCountry(next);
+  };
+  if (!country) {
+    const t = makeI18n(lang).t;
+    return <div className="app"><div className="splash">{t.loading}</div></div>;
+  }
+  return <CountryView key={country.iso3} country={country} countries={countries} lang={lang} setLang={setLang} onCountry={switchCountry} />;
+}
+
+interface ViewProps {
+  country: CountryInfo;
+  /** every country of the index (the selector is shown when there are two or more), null without the index */
+  countries: CountryInfo[] | null;
+  lang: Lang;
+  setLang: (l: Lang) => void;
+  /** switch country; month: the selected month as "YYYY-MM", null for the latest */
+  onCountry: (c: CountryInfo, month: string | null) => void;
+}
+
+function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps) {
+  const path = country.path;
+  const countryName = country.name[lang];
   // what the numbers mean: hotspot counts or harmonized fire power (MW). `metric` is what was asked for; `active`
   // only switches once frp.json has loaded (it is fetched lazily, on the first switch).
   const [metric, setMetric] = useState<Metric>("count");
@@ -46,7 +90,7 @@ export default function App() {
   const { t, num } = i18n;
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [zoneKind, setZoneKind] = useState<ZoneKind>("paraguay");
+  const [zoneKind, setZoneKind] = useState<ZoneKind>(country.area);
   const [departments, setDepartments] = useState<DepartmentsFile | null>(null); // null until loaded, or when it failed
   const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [season, setSeason] = useState<SeasonFile | null>(null); // null until loaded, or when it failed: the chart stays hidden
@@ -54,7 +98,8 @@ export default function App() {
   const [polygon, setPolygon] = useState<number[][] | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
   const [coordsOpen, setCoordsOpen] = useState(false);
-  const [coordsForm, setCoordsForm] = useState({ lat: "-22.35", lon: "-60.03", r: "25" });
+  const example = country.example ?? [Math.round(((country.bbox[1] + country.bbox[3]) / 2) * 100) / 100, Math.round(((country.bbox[0] + country.bbox[2]) / 2) * 100) / 100];
+  const [coordsForm, setCoordsForm] = useState({ lat: String(example[0]), lon: String(example[1]), r: "25" });
   const [coordsError, setCoordsError] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [month, setMonth] = useState<number>(-1);
@@ -65,6 +110,8 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<number | null>(null);
+  // archived hotspot blocks (hotspots/index.json): null while loading; false when the country has none (no full download)
+  const [hasArchive, setHasArchive] = useState<boolean | null>(null);
   const [viewNonce, setViewNonce] = useState(0);
   const [mapMoved, setMapMoved] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -72,19 +119,21 @@ export default function App() {
   const toastTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    const depsLoad = loadDepartments(); // lazy and optional: starts with the grid, never blocks it
+    const depsLoad = loadDepartments(path); // lazy and optional: starts with the grid, never blocks it
     void depsLoad.then(setDepartments);
-    void loadSeason().then(setSeason);
-    void loadContext().then(setContext);
-    loadData().then(async (d) => {
-      // a shared department link has to wait for departments.json, or it would restore as Paraguay
-      const link = decodeState(window.location.search);
+    void loadSeason(path).then(setSeason);
+    void loadContext(path).then(setContext);
+    loadData(path).then(async (d) => {
+      // a shared department link has to wait for departments.json, or it would restore as the whole country
+      const link = decodeState(window.location.search, (iso3) => (iso3 === country.iso3 ? country.bbox : undefined));
       const deps = link.zone === "department" ? await depsLoad : null;
       const last = d.grid.nMonths - 1;
       const { year } = H.monthOf(d.grid.meta, last);
       const defRange: [number, number] = [Math.max(0, H.indexOf(d.grid.meta, year, 1)), last];
       // restore a shared link only here, once the grid is known, so months can be clamped to the data
-      const r = planRestore(d.grid.meta.months.first, d.grid.nMonths, link, defRange, deps ? deps.departments.map((x) => x.id) : null);
+      const regions = regionPresets(d.grid.meta, [], d.regionCells).ids;
+      const r = planRestore(d.grid.meta.months.first, d.grid.nMonths, link, defRange, deps ? deps.departments.map((x) => x.id) : null,
+        { area: country.area, regions, bbox: country.bbox });
       setZoneKind(r.zone);
       setDepartmentId(r.dep);
       setCoords(r.coords);
@@ -94,10 +143,10 @@ export default function App() {
       } else setPolygon(r.poly);
       setMonth(r.month);
       setRange(r.range);
-      setCalMode(r.cal); setNaive(r.naive); setNewOnly(r.newOnly); setMetric(r.metric);
+      setCalMode(r.cal); setNaive(r.naive); setNewOnly(r.newOnly && d.hasBurnHistory); setMetric(r.metric);
       setData(d);
     }).catch((e) => setError(String(e)));
-  }, []);
+  }, [path, country]);
   useEffect(() => { document.documentElement.lang = lang; document.title = `Tata Rekavo · ${t.title}`; saveLang(lang); }, [lang, t]);
 
   // frp.json is 2.4 MB: only fetched once the reader asks for fire power
@@ -105,23 +154,27 @@ export default function App() {
     if (metric !== "frp" || !data || frpRequested.current) return;
     frpRequested.current = true;
     // no cancellation: if the reader goes back to Hotspots before it arrives, the grid is still kept for the next switch
-    void loadFrp().then((j) => {
+    void loadFrp(path).then((j) => {
       try {
         if (!j) throw new Error("frp.json unavailable");
         setFrpGrid(H.decodeFrp(j, data.currentJson, data.grid.meta));
       } catch { setFrpFailed(true); setMetric("count"); }
     });
-  }, [metric, data]);
+  }, [metric, data, path]);
   const frpLoading = metric === "frp" && !frpGrid && !frpFailed; // derived: cannot get stuck
 
   // countGrid fixes the geography (cells, areas, hotspot downloads); grid is the one the active measure reads
   const countGrid = data?.grid;
   const grid = active === "frp" && frpGrid ? frpGrid : countGrid;
-  const regionOf = useMemo(() => {
-    const r = new Map<number, string>();
-    if (countGrid) for (const idx of countGrid.cells.keys()) r.set(idx, regionOfCell(countGrid.meta, idx));
-    return r;
-  }, [countGrid]);
+  // region presets of the country (Paraguay: Chaco / Oriental; biome countries: regions.json) and the region of each cell
+  const regions = useMemo(() => (countGrid ? regionPresets(countGrid.meta, countGrid.cells.keys(), data?.regionCells ?? null)
+    : { ids: [] as string[], of: new Map<number, string>() }), [countGrid, data]);
+  const regionOf = regions.of;
+  const presetIds = useMemo(() => [country.area, ...regions.ids], [country.area, regions]);
+  // display names: the country, Paraguay's regions and the biomes from i18n; otherwise the label in the data, or the id
+  const metaLabels = (countGrid?.meta.regions?.labels ?? {}) as Record<string, string>;
+  const zoneName = (id: string) => (id === country.area ? countryName : i18n.t.zones[id] ?? metaLabels[id] ?? id);
+  const zoneIn = (id: string) => (id === country.area ? countryName : i18n.t.zoneIn[id] ?? zoneName(id));
 
   const department = useMemo(
     () => (zoneKind === "department" && departmentId ? departments?.departments.find((d) => d.id === departmentId) ?? null : null),
@@ -131,11 +184,11 @@ export default function App() {
     if (!countGrid) return [];
     if (zoneKind === "department" && department) return department.cells;
     if (zoneKind === "custom" && polygon) return H.cellsInPolygon(countGrid, polygon);
-    if (zoneKind === "chaco" || zoneKind === "oriental") return [...countGrid.cells.keys()].filter((i) => regionOf.get(i) === zoneKind);
+    if (regions.ids.includes(zoneKind)) return [...countGrid.cells.keys()].filter((i) => regionOf.get(i) === zoneKind);
     return [...countGrid.cells.keys()];
-  }, [countGrid, zoneKind, department, polygon, regionOf]);
+  }, [countGrid, zoneKind, department, polygon, regionOf, regions]);
   const zoneSet = useMemo(() => new Set(zoneCells), [zoneCells]);
-  const zoneBBox = useMemo(() => (department ? department.bbox : countGrid && zoneCells.length ? bboxOfCells(countGrid.meta, zoneCells) : [-62.8, -27.7, -54.1, -19.1] as [number, number, number, number]), [countGrid, zoneCells, department]);
+  const zoneBBox = useMemo(() => (department ? department.bbox : countGrid && zoneCells.length ? bboxOfCells(countGrid.meta, zoneCells) : country.bbox), [countGrid, zoneCells, department, country.bbox]);
   // what the map outlines: the department boundary or the hand-made polygon
   const outline = useMemo<GeoJSON.Geometry | null>(() => (department ? department.geometry
     : zoneKind === "custom" && polygon ? { type: "LineString", coordinates: polygon } : null), [department, zoneKind, polygon]);
@@ -163,14 +216,15 @@ export default function App() {
   useEffect(() => {
     if (!countGrid || !data) return;
     let alive = true;
-    hotspotIndex().then(() => { // warm the block index while the user decides
+    hotspotIndex(path).then((idx) => { // warm the block index while the user decides
       if (!alive) return;
+      setHasArchive(!!idx);
       const hist = estimateHistoricalRows(countGrid, zoneCells, range[0], range[1]);
       const recent = data.hotspots.filter((h) => h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).length;
       setEstimate(Math.round(hist + recent));
     });
     return () => { alive = false; };
-  }, [countGrid, data, zoneCells, zoneSet, range]);
+  }, [countGrid, data, zoneCells, zoneSet, range, path]);
 
   // the state a shared link carries; null until the initial restore has run
   const shareQs = useMemo(() => {
@@ -178,18 +232,18 @@ export default function App() {
     const first = data.grid.meta.months.first;
     const lastI = data.grid.nMonths - 1;
     const defStart = Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastI).year, 1));
-    const s: ShareState = { lang, cal: calMode, naive, newOnly };
+    const s: ShareState = { lang, country: country.iso3, cal: calMode, naive, newOnly };
     if (metric === "frp") s.metric = "frp";
     if (zoneKind === "custom") {
       if (coords) s.c = coords; else if (polygon) s.poly = polygon;
       if (coords || polygon) s.zone = "custom";
     } else if (zoneKind === "department") {
       if (department) { s.zone = "department"; s.dep = department.id; }
-    } else s.zone = zoneKind;
+    } else if (zoneKind !== country.area) s.zone = zoneKind;
     if (month >= 0 && month !== lastI) s.m = indexToMonth(first, month);
     if (range[0] !== defStart || range[1] !== lastI) s.range = [indexToMonth(first, range[0]), indexToMonth(first, range[1])];
     return encodeState(s);
-  }, [data, lang, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric]);
+  }, [data, lang, country, zoneKind, department, polygon, coords, month, range, calMode, naive, newOnly, metric]);
 
   useEffect(() => {
     if (shareQs === null) return; // never overwrite the incoming URL before it has been restored
@@ -220,7 +274,7 @@ export default function App() {
     if (!data) return;
     const lastM = data.grid.nMonths - 1;
     setDrawing(false); setCoordsOpen(false); setCoordsError(false);
-    setZoneKind("paraguay"); setDepartmentId(null); setPolygon(null); setCoords(null);
+    setZoneKind(country.area); setDepartmentId(null); setPolygon(null); setCoords(null);
     setMonth(lastM);
     setRange([Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastM).year, 1)), lastM]);
     setCalMode("ratio"); setNaive(false); setNewOnly(false); setMetric("count"); setDlError(null);
@@ -231,17 +285,28 @@ export default function App() {
   // "Reset all" only makes sense once something differs from the starting view
   const lastIdx = data ? data.grid.nMonths - 1 : -1;
   const startRange = data ? [Math.max(0, H.indexOf(data.grid.meta, H.monthOf(data.grid.meta, lastIdx).year, 1)), lastIdx] : [0, 0];
-  const changed = !!data && (zoneKind !== "paraguay" || drawing || coordsOpen || month !== lastIdx
+  const changed = !!data && (zoneKind !== country.area || drawing || coordsOpen || month !== lastIdx
     || range[0] !== startRange[0] || range[1] !== startRange[1] || calMode !== "ratio" || naive || newOnly || metric !== "count" || mapMoved);
 
   const generated = data?.current?.generated;
   const stale = !!generated && isStale(generated, new Date());
   const updatedLine = generated ? (
     <p className={stale ? "updated stale" : "updated"}>
-      {t.lastUpdated(formatUpdated(generated, lang))}
+      {t.lastUpdated(formatUpdated(generated, lang, country.tz), country.tzCity ?? "Asunción")}
       {stale && <> · {t.staleData}</>}
     </p>
   ) : null;
+
+  // the country selector: in the nav on wide screens, under the title on phones (where the nav leaves the title no room)
+  const countrySelect = (where: "nav" | "brand") => countries && countries.length > 1 && (
+    <select className={`country country-${where}`} value={country.iso3} aria-label={t.countryLabel} title={t.countryLabel}
+      onChange={(e) => {
+        const next = countries.find((c) => c.iso3 === e.target.value);
+        if (next && next.iso3 !== country.iso3) onCountry(next, data && month >= 0 && month !== data.grid.nMonths - 1 ? indexToMonth(data.grid.meta.months.first, month) : null);
+      }}>
+      {countries.map((c) => <option key={c.iso3} value={c.iso3}>{c.name[lang]}</option>)}
+    </select>
+  );
 
   const header = (
     <header className="top">
@@ -249,18 +314,20 @@ export default function App() {
         <span className="logo" aria-hidden>◉</span>
         <div>
           <h1>{t.title}</h1>
-          <p>{t.subtitle}</p>
+          <p>{t.subtitle(countryName)}</p>
+          {countrySelect("brand")}
           {updatedLine}
         </div>
       </div>
       <nav>
+        {countrySelect("nav")}
         <a href={`${REPO}#method`} target="_blank" rel="noreferrer">{t.method}</a>
         <a href={REPO} target="_blank" rel="noreferrer">{t.code}</a>
         <button className="reset-all copy-link" onClick={() => void copyLink()} title={t.copyLinkTitle} aria-label={t.copyLink}>
           <span aria-hidden>🔗</span><span className="lbl">{t.copyLink}</span>
         </button>
         {changed && (
-          <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle} aria-label={t.resetAllTitle}>
+          <button className="reset-all" onClick={() => resetAll()} title={t.resetAllTitle(countryName)} aria-label={t.resetAllTitle(countryName)}>
             <span aria-hidden>↺</span><span className="lbl">{t.resetAll.replace("↺ ", "")}</span>
           </button>
         )}
@@ -286,7 +353,8 @@ export default function App() {
   const cov = coverage(month);
   const v = H.verdict(grid, series.harmonized, month, cov);
   const cls = CLASS_STYLE[v.class.id];
-  // protected areas: figures only for Paraguay, the regions and the departments, and only up to the month the data reaches
+  // protected areas (context.json, Paraguay only): figures for the country, the regions and the departments, and only up to
+  // the month the data reaches
   const protZone = zoneKind === "department" ? department?.id ?? null : zoneKind === "custom" ? null : zoneKind;
   const protThrough = context ? context.meta.through.split("-").map(Number) : null;
   const protThroughIdx = protThrough ? H.indexOf(meta, protThrough[0], protThrough[1]) : -1;
@@ -306,6 +374,7 @@ export default function App() {
   const monthLong = i18n.monthLong(selMonth);
   const monthsDesc = Array.from({ length: grid.nMonths }, (_, m) => m).reverse();
   const val = meta.validation?.leave_one_year_out;
+  const valRows = H.validationSummary(meta, country.area).rows;
   const frpOn = active === "frp";
   const experimental = frpOn && meta.experimental === true; // from the data, never inferred from meta.name
   const lastPartial = coverage(last) < 1;
@@ -314,7 +383,7 @@ export default function App() {
   const pctNew = zoneMonthHotspots.length ? (100 * nNew) / zoneMonthHotspots.length : 0;
   const zoneLabel = zoneKind === "custom" && coords
     ? t.zoneCoords(coords.lat.toFixed(2), coords.lon.toFixed(2), String(coords.r))
-    : zoneKind === "department" ? t.zoneDept(department?.name ?? "") : t.zoneIn[zoneKind];
+    : zoneKind === "department" ? t.zoneDept(department?.name ?? "") : zoneIn(zoneKind);
   const rangeLabel = `${ml(range[0])} – ${ml(range[1])}`;
   const rangeNew = data.hotspots.filter((h) => h.fresh && h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).length;
   const lastYear = H.monthOf(meta, last).year;
@@ -340,7 +409,7 @@ export default function App() {
 
   const pickZone = (k: ZoneKind) => { setDrawing(false); setCoordsOpen(false); setZoneKind(k); setDepartmentId(null); if (k !== "custom") { setPolygon(null); setCoords(null); } };
   const pickDepartment = (id: string | null) => {
-    if (!id) { pickZone("paraguay"); return; }
+    if (!id) { pickZone(country.area); return; }
     setDrawing(false); setCoordsOpen(false); setPolygon(null); setCoords(null);
     setDepartmentId(id); setZoneKind("department");
     // stacked phone layout: the answer sits above the list, so bring it to the top of the screen.
@@ -358,7 +427,7 @@ export default function App() {
   const applyCoords = () => {
     const parse = (s: string) => parseFloat(s.replace(",", ".").replace("−", "-"));
     const lat = parse(coordsForm.lat), lon = parse(coordsForm.lon), r = parse(coordsForm.r);
-    const ok = validateCoords(lat, lon, r);
+    const ok = validateCoords(lat, lon, r, country.bbox);
     setCoordsError(!ok);
     if (!ok) return;
     setDrawing(false);
@@ -373,7 +442,7 @@ export default function App() {
     setDlError(null);
     try {
       const hist = range[0] < meta.months.count
-        ? await historicalHotspotRows(meta, zoneSet, range[0], Math.min(range[1], meta.months.count - 1), (a, b) => setBusy(t.dlPreparing(a, b)))
+        ? await historicalHotspotRows(meta, zoneSet, range[0], Math.min(range[1], meta.months.count - 1), (a, b) => setBusy(t.dlPreparing(a, b)), path)
         : [];
       const recent = data.hotspots.filter((h) => h.m >= range[0] && h.m <= range[1] && zoneSet.has(h.cell)).map((h) => h.csv);
       const rows = [...hist, ...recent];
@@ -403,10 +472,10 @@ export default function App() {
           <aside className="panel">
             <section className="sec-area">
               <h2>{t.step1}</h2>
-              <div className="seg area" role="group" aria-label={t.areaPresets}>
-                {(["paraguay", "chaco", "oriental"] as const).map((k) => (
+              <div className={presetIds.length > 3 ? "seg area many" : "seg area"} role="group" aria-label={t.areaPresets}>
+                {presetIds.map((k) => (
                   <button key={k} aria-pressed={zoneKind === k && !drawing && !coordsOpen}
-                    className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{t.zones[k]}</button>
+                    className={zoneKind === k && !drawing && !coordsOpen ? "on" : ""} onClick={() => pickZone(k)}>{zoneName(k)}</button>
                 ))}
               </div>
               {department && <p className="dep-active" role="status"><span aria-hidden>◉</span> {t.depActive(department.name)}</p>}
@@ -426,12 +495,13 @@ export default function App() {
                   <label>{t.coordsRadius}<input inputMode="decimal" value={coordsForm.r} onChange={(e) => setCoordsForm({ ...coordsForm, r: e.target.value })} /></label>
                   <button onClick={applyCoords}>{t.coordsApply}</button>
                 </div>
-                <p className={coordsError ? "dl-error" : "note"}>{coordsError ? t.coordsInvalid : t.coordsHelp}</p>
+                <p className={coordsError ? "dl-error" : "note"}>{coordsError ? t.coordsInvalid(countryName)
+                  : t.coordsHelp(String(example[0]).replace("-", "−"), String(example[1]).replace("-", "−"), countryName)}</p>
               </>)}
               <p className="meta">
                 {zoneCells.length > 0 ? t.cellsArea(num(zoneCells.length), num(areaKm2(meta, zoneCells))) : <span className="warn">{t.noCells}</span>}
-                {(zoneKind !== "paraguay" || drawing || coordsOpen) && (
-                  <button className="link" onClick={() => pickZone("paraguay")}>{t.resetArea}</button>
+                {(zoneKind !== country.area || drawing || coordsOpen) && (
+                  <button className="link" onClick={() => pickZone(country.area)}>{t.resetArea(countryName)}</button>
                 )}
               </p>
               {small && zoneCells.length > 0 && <p className="warn">{t.smallArea}</p>}
@@ -506,7 +576,7 @@ export default function App() {
                 <p>{t.hotspotDef}</p>
               </details>
               </div>
-              <ValidationPanel meta={meta} />
+              <ValidationPanel meta={meta} countryArea={country.area} countryName={countryName} path={path} areaName={zoneName} />
             </section>
 
             {context && (protSummary || protNote) && (
@@ -519,7 +589,7 @@ export default function App() {
                 onSelect={pickDepartment} />
             )}
 
-            <section className="newplaces">
+            {data.hasBurnHistory && <section className="newplaces">
               <h2><span className="dot-new" aria-hidden />{t.newTitle}</h2>
               {monthHotspots.length > 0 ? (<>
                 <p className="stat">{nNew > 0
@@ -534,7 +604,7 @@ export default function App() {
                   <p>{t.newNote}</p>
                 </details>
               </>) : <p className="note">{t.newUnavailable}</p>}
-            </section>
+            </section>}
 
             <section>
               <div className="h2row">
@@ -611,11 +681,13 @@ export default function App() {
                   const lines = H.seriesToCSV(grid, series, { metric: active }).trimEnd().split("\n");
                   download(`tata-rekavo_monthly_${metricTag}${fileTag}.csv`, [lines[0], ...lines.slice(range[0] + 1, range[1] + 2)].join("\n") + "\n");
                 }}>{t.dlSeriesRange(ml(range[0]), ml(range[1]))}</button>
-                <button disabled={!!busy || tooMany || !zoneCells.length} onClick={downloadHotspots}>
-                  {busy ?? t.dlHotspotsRange(ml(range[0]), ml(range[1]))}
-                  {!busy && estimate !== null && !tooMany && <span className="dl-hint">{t.dlHotspotsEstimate(num(estimate))}</span>}
-                </button>
-                {tooMany && <p className="dl-error">{t.dlTooMany(num(estimate ?? 0))}</p>}
+                {hasArchive !== false && (<>
+                  <button disabled={!!busy || tooMany || !zoneCells.length} onClick={downloadHotspots}>
+                    {busy ?? t.dlHotspotsRange(ml(range[0]), ml(range[1]))}
+                    {!busy && estimate !== null && !tooMany && <span className="dl-hint">{t.dlHotspotsEstimate(num(estimate))}</span>}
+                  </button>
+                  {tooMany && <p className="dl-error">{t.dlTooMany(num(estimate ?? 0))}</p>}
+                </>)}
                 <button onClick={() => downloadReport({ grid, series, coverage, i18n, zoneLabel, range, rangeLabel, mode: calMode, analytics,
                   lines: analyticsLines }, `tata-rekavo_report_${metricTag}${fileTag}.png`)}>{t.dlReport}</button>
                 {dlError && <p className="dl-error">{t.dlFailed} {dlError}</p>}
@@ -627,9 +699,10 @@ export default function App() {
                 <summary>{t.aboutData}</summary>
                 <p>{t.footData(meta.months.last, data.current?.to ?? null)}</p>
                 {updatedLine}
-                {val && <p>{t.footValidation((val.country ?? val.paraguay)?.mdape_pct, val.chaco?.mdape_pct, val.oriental?.mdape_pct)}</p>}
+                {val && valRows.length > 0 && <p>{t.footValidation(valRows.map((r) => [r.mdapePct, r.area === "country" ? countryName : zoneIn(r.area)]))}</p>}
                 <h3 className="about-h">{t.partnerTitle}</h3>
-                <p>{t.footBoundaries(departments?.meta.retrieved ?? GEOBOUNDARIES_RETRIEVED)}{" "}
+                <p>{t.footBoundaries(departments?.meta.retrieved ?? (country.iso3 === "PRY" ? GEOBOUNDARIES_RETRIEVED : null),
+                  country.iso3 === "PRY" ? t.admPry : `${countryName} ADM1`)}{" "}
                   <a href={GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
                 </p>
                 {context && (
@@ -644,6 +717,7 @@ export default function App() {
           </aside>
 
           <MapView grid={countGrid} metric={active} monthLabel={monthLabel} values={monthValues} zone={zoneSet} zoneBBox={zoneBBox} viewNonce={viewNonce}
+            countryBBox={country.bbox} showNew={data.hasBurnHistory}
             outline={outline} hotspots={monthHotspots} newOnly={newOnly} i18n={i18n} drawing={drawing}
             onDrawn={(ring) => { setPolygon(ring); setCoords(null); setDepartmentId(null); setZoneKind("custom"); setDrawing(false); }}
             onCancelDraw={() => setDrawing(false)}

@@ -34,6 +34,10 @@ interface Props {
   metric: "count" | "frp";
   zone: Set<number>;
   zoneBBox: [number, number, number, number];
+  /** the country's bbox: the first framing, before the zone is known */
+  countryBBox: [number, number, number, number];
+  /** "fire in new places" is available (burn history loaded): only then the legend counts hotspots in new places */
+  showNew: boolean;
   /** changes whenever the app asks the map to go back to the zone view */
   viewNonce: number;
   /** the selected zone's outline (a department boundary or the drawn polygon), if it has one */
@@ -56,6 +60,8 @@ const empty: GJ = { type: "FeatureCollection", features: [] };
 export default function MapView(p: Props) {
   const { t, num } = p.i18n;
   const nNew = p.hotspots.filter((h) => h.fresh).length;
+  // cell size in the legend and the popup, from the grid (0.1 degree ~ 11 km in Paraguay, 0.25 degree ~ 28 km in Bolivia)
+  const cellKm = Math.round(p.grid.meta.grid.deg * 111.32);
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -79,7 +85,7 @@ export default function MapView(p: Props) {
       } catch { /* offline: plain background */ }
       if (cancelled || !box.current) return;
       const m = new maplibregl.Map({
-        container: box.current, style, bounds: [-62.8, -27.7, -54.1, -19.1],
+        container: box.current, style, bounds: props.current.countryBBox,
         fitBoundsOptions: { padding: 24 }, attributionControl: { compact: true },
         // on phones the page scrolls: one finger scrolls the page, two fingers move the map
         cooperativeGestures: window.matchMedia("(max-width: 860px)").matches,
@@ -142,7 +148,7 @@ export default function MapView(p: Props) {
           if (!f) return;
           m.getCanvas().style.cursor = "default";
           popup.setLngLat(e.lngLat)
-            .setHTML(`<b>${props.current.i18n.num(Number(f.properties.v))}</b> ${props.current.i18n.t.hotspots}<br><span>${props.current.i18n.t.popupCell(props.current.monthLabel)}</span>`)
+            .setHTML(`<b>${props.current.i18n.num(Number(f.properties.v))}</b> ${props.current.i18n.t.hotspots}<br><span>${props.current.i18n.t.popupCell(props.current.monthLabel, Math.round(props.current.grid.meta.grid.deg * 111.32))}</span>`)
             .addTo(m);
         });
         m.on("mouseleave", "cells", () => popup.remove());
@@ -282,12 +288,12 @@ export default function MapView(p: Props) {
         </div>
       )}
       <div className="map-legend">
-        <div className="legend-title">{t.mapLegend(p.monthLabel)}</div>
+        <div className="legend-title">{t.mapLegend(p.monthLabel, cellKm)}</div>
         <div className="legend-ramp">
           {(p.metric === "frp" ? FRP_RAMP : CELL_RAMP).map(([v, c], i, a) => (<span key={v}><i style={{ background: c }} />{rampLabel(v, i === a.length - 1)}</span>))}
         </div>
         {p.hotspots.length > 0 && !p.newOnly && <div className="legend-dots"><i /> {t.legendDots(num(p.hotspots.length))}</div>}
-        {p.hotspots.length > 0 && <div className="legend-dots new"><i /> {t.legendNew(num(nNew))}</div>}
+        {p.hotspots.length > 0 && p.showNew && <div className="legend-dots new"><i /> {t.legendNew(num(nNew))}</div>}
       </div>
     </div>
   );

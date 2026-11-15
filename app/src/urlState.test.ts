@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeState, encodeState, validateCoords, type ShareState } from "./urlState.ts";
+import { readFileSync } from "node:fs";
+import { countryOf, decodeState, encodeState, validateCoords, type BBox, type BBoxOf, type ShareState } from "./urlState.ts";
+
+// the bboxes the app reads from the countries index (data/app/countries.json)
+const index = JSON.parse(readFileSync(new URL("../../data/app/countries.json", import.meta.url), "utf8")) as { countries: { iso3: string; bbox: BBox }[] };
+const bboxOf: BBoxOf = (iso3) => index.countries.find((c) => c.iso3 === iso3)?.bbox;
 
 const ring = (n: number): number[][] =>
   Array.from({ length: n }, (_, i) => [
@@ -88,7 +93,9 @@ test("polygon with fewer than 3 vertices is ignored", () => {
 });
 
 test("unknown enum values are ignored", () => {
-  assert.deepEqual(decodeState("lang=fr&z=mars&cal=weird"), {});
+  // z is any slug (a biome id can be a zone); a zone the country does not have is dropped by planRestore
+  assert.deepEqual(decodeState("lang=fr&z=mars&cal=weird"), { zone: "mars" });
+  assert.deepEqual(decodeState("lang=fr&z=Mars!&cal=weird"), {});
   assert.deepEqual(decodeState("z=chaco&cal=count&naive=1&new=1"), {
     zone: "chaco", cal: "count", naive: true, newOnly: true,
   });
@@ -149,4 +156,37 @@ test("metric: x=frp decodes, anything else is ignored (including an explicit cou
 test("metric round-trips together with area and month", () => {
   const s: ShareState = { zone: "department", dep: "PY-11", m: "2024-09", metric: "frp" };
   assert.deepEqual(decodeState(encodeState(s)), s);
+});
+
+test("country=BOL&c=-17,-63,25 is valid; c=-17,-63,25 without country is outside Paraguay", () => {
+  assert.deepEqual(decodeState("country=BOL&c=-17,-63,25", bboxOf), { country: "BOL", c: { lat: -17, lon: -63, r: 25 } });
+  assert.deepEqual(decodeState("c=-17,-63,25", bboxOf), {});
+  assert.deepEqual(decodeState("c=-22.35,-60.03,25", bboxOf), { c: { lat: -22.35, lon: -60.03, r: 25 } });
+  assert.deepEqual(decodeState("country=BOL&c=-25.3,-57.6,25", bboxOf), { country: "BOL" }); // Asunción is outside the Bolivia bbox
+});
+
+test("country: PRY is the default and is not written; other countries are, any case on input", () => {
+  assert.equal(encodeState({ country: "PRY", lang: "es" }), "lang=es");
+  assert.equal(encodeState({ lang: "es", country: "BOL", zone: "department", dep: "santa-cruz", m: "2024-09" }),
+    "lang=es&country=BOL&z=department&dep=santa-cruz&m=2024-09");
+  assert.deepEqual(decodeState("country=bol&z=department&dep=santa-cruz&m=2024-09", bboxOf),
+    { country: "BOL", zone: "department", dep: "santa-cruz", m: "2024-09" });
+  assert.deepEqual(decodeState("country=PRY&z=chaco", bboxOf), { zone: "chaco" });
+  assert.equal(countryOf(""), "PRY");
+  assert.equal(countryOf("?country=BOL"), "BOL");
+  assert.equal(countryOf("?country=Bolivia"), "PRY"); // not an ISO3 code
+  // a country the index does not know (or no index: Paraguay only) cannot validate a point
+  assert.deepEqual(decodeState("country=BOL&c=-17,-63,25"), { country: "BOL" });
+});
+
+test("old links without country decode exactly as before", () => {
+  assert.deepEqual(decodeState("z=department&dep=alto-paraguay&m=2024-09", bboxOf), { zone: "department", dep: "alto-paraguay", m: "2024-09" });
+  assert.deepEqual(decodeState("z=department&dep=alto-paraguay&m=2024-09"), { zone: "department", dep: "alto-paraguay", m: "2024-09" });
+});
+
+test("validateCoords uses the country bbox", () => {
+  const bol = bboxOf("BOL")!;
+  assert.equal(validateCoords(-17, -63, 25, bol), true);
+  assert.equal(validateCoords(-17, -63, 25), false);
+  assert.equal(validateCoords(-17, -63, 400, bol), false);
 });

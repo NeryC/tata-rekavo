@@ -95,3 +95,33 @@ test("planRestore: x=frp restores the FRP metric and keeps area and month; defau
   assert.deepEqual([r.metric, r.zone, r.month], ["frp", "chaco", 2]);
   assert.equal(planRestore(FIRST, N, { zone: "chaco" }, DEF).metric, "count");
 });
+
+const BOL = {
+  area: "bolivia",
+  regions: ["tropical-subtropical-moist-broadleaf-forests", "tropical-subtropical-dry-broadleaf-forests"],
+  bbox: [-69.7, -22.95, -57.4, -9.6] as [number, number, number, number],
+};
+
+test("polyInBounds uses the country bbox widened to whole degrees", () => {
+  assert.equal(polyInBounds([[-63, -17], [-62, -16], [-62.5, -15]], BOL.bbox), true);
+  assert.equal(polyInBounds([[-63, -17], [-62, -16], [-62.5, -15]]), false); // Bolivia is outside the Paraguay frame
+  assert.equal(polyInBounds([[-57, -25], [-56, -24], [-58, -23]], BOL.bbox), false);
+});
+
+test("planRestore for another country: its area, its region presets and its departments", () => {
+  const deps = ["beni", "santa-cruz"];
+  assert.equal(planRestore(FIRST, N, {}, DEF, deps, BOL).zone, "bolivia");
+  assert.equal(planRestore(FIRST, N, { zone: "tropical-subtropical-dry-broadleaf-forests" }, DEF, deps, BOL).zone, "tropical-subtropical-dry-broadleaf-forests");
+  assert.equal(planRestore(FIRST, N, { zone: "chaco" }, DEF, deps, BOL).zone, "bolivia"); // a Paraguay preset is not a Bolivia one
+  assert.equal(planRestore(FIRST, N, { zone: "custom" }, DEF, deps, BOL).zone, "bolivia");
+  const d = planRestore(FIRST, N, { zone: "department", dep: "santa-cruz", m: "2024-06" }, DEF, deps, BOL);
+  assert.deepEqual([d.zone, d.dep, d.month], ["department", "santa-cruz", 149]);
+  assert.equal(planRestore(FIRST, N, { zone: "department", dep: "alto-paraguay" }, DEF, deps, BOL).zone, "bolivia");
+  const poly = planRestore(FIRST, N, { poly: [[-63, -17], [-62, -16], [-62.5, -15]] }, DEF, deps, BOL);
+  assert.equal(poly.zone, "custom");
+  assert.equal(planRestore(FIRST, N, { poly: [[-57, -25], [-56, -24], [-58, -23]] }, DEF, deps, BOL).zone, "bolivia");
+});
+
+test("planRestore: Paraguay presets do not include a biome id", () => {
+  assert.equal(planRestore(FIRST, N, { zone: "tropical-subtropical-dry-broadleaf-forests" }, DEF).zone, "paraguay");
+});

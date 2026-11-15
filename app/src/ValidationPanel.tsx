@@ -5,13 +5,19 @@ import { useI18n } from "./i18n";
 
 type Meta = Parameters<typeof H.validationSummary>[0];
 
-/** "How reliable is this?": held-out-year validation numbers (from metrics.json via meta) plus the validation chart. */
-export default function ValidationPanel({ meta }: { meta: Meta }) {
+/**
+ * "How reliable is this?": held-out-year validation numbers (from metrics.json via meta) plus the validation chart.
+ * countryArea: the country's area id (key of the country row in frp.json); path: the country's data folder;
+ * areaName: display name of "country" or of a region id.
+ */
+export default function ValidationPanel({ meta, countryArea, countryName, path, areaName }:
+  { meta: Meta; countryArea: string; countryName: string; path: string; areaName: (id: string) => string }) {
   const { t, lang, num, metric } = useI18n();
   const loc = lang === "es" ? "es-PY" : "en-US";
   const dec = (n: number, d: number) => n.toLocaleString(loc, { minimumFractionDigits: d, maximumFractionDigits: d });
   const [imgOk, setImgOk] = useState(true);
-  const v = H.validationSummary(meta);
+  const v = H.validationSummary(meta, countryArea);
+  const biomes = (meta.regions as { kind?: string } | undefined)?.kind === "biome";
   // columns follow what the active measure publishes: counts have class agreement, fire power has the p90 error
   const showClass = v.rows.some((r) => r.classAgreementPct !== null);
   const showP90 = v.rows.some((r) => r.p90Pct !== undefined);
@@ -35,7 +41,7 @@ export default function ValidationPanel({ meta }: { meta: Meta }) {
               <tbody>
                 {v.rows.map((r) => (
                   <tr key={r.area}>
-                    <th scope="row">{t.zones[r.area]}</th>
+                    <th scope="row">{r.area === "country" ? countryName : areaName(r.area)}</th>
                     <td>{dec(r.mdapePct, 1)}%</td>
                     {showP90 && <td>{r.p90Pct === undefined ? "—" : `${dec(r.p90Pct, 1)}%`}</td>}
                     {showClass && <td>{r.classAgreementPct === null ? "—" : `${num(r.classAgreementPct)}%`}</td>}
@@ -45,13 +51,14 @@ export default function ValidationPanel({ meta }: { meta: Meta }) {
             </table>
           </div>
         )}
-        {v.spearman !== null && <p>{t.trustSpearman(dec(v.spearman, 3), num(v.nMonths))}</p>}
+        {v.spearman !== null && <p>{t.trustSpearman(dec(v.spearman, 3), num(v.nMonths), countryName)}</p>}
         <p>{t.trustRecent}</p>
         <p>{t.trustEarly}</p>
         {t.trustExtra && <p>{t.trustExtra}</p>}
         {imgOk && metric === "count" && (
-          <a className="trust-fig" href={url("validation.png")} target="_blank" rel="noopener">
-            <img src={url("validation.png")} loading="lazy" alt={t.validationAlt} onError={() => setImgOk(false)} />
+          <a className="trust-fig" href={url("validation.png", path)} target="_blank" rel="noopener">
+            <img src={url("validation.png", path)} loading="lazy" alt={t.validationAlt(biomes ? t.validationRegionsBiome : t.validationRegionsRiver)}
+              onError={() => setImgOk(false)} />
             <span>{t.trustOpen} <span aria-hidden="true">↗</span><span className="sr-only"> {t.opensNewTab}</span></span>
           </a>
         )}

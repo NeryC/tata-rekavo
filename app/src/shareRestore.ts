@@ -1,6 +1,6 @@
 // Pure helpers that turn a decoded ShareState into App state. Month indices are
 // relative to meta.months.first ("YYYY-MM"); no React, no @core, so node:test can run it.
-import type { ShareState } from "./urlState.ts";
+import type { BBox, ShareState } from "./urlState.ts";
 
 export type Coords = { lat: number; lon: number; r: number };
 
@@ -37,9 +37,13 @@ export function rangeFromLink(first: string, range: [string, string] | undefined
   return a <= b ? [a, b] : [b, a];
 }
 
-/** Every vertex ([lon, lat]) must lie inside the Paraguay frame (with margin). */
-export function polyInBounds(poly: number[][]): boolean {
-  return poly.every(([lon, lat]) => lat >= -28 && lat <= -19 && lon >= -63 && lon <= -54);
+const PRY_BBOX: BBox = [-62.8, -27.7, -54.1, -19.1];
+
+/** Every vertex ([lon, lat]) must lie inside the country frame: its bbox widened to whole degrees
+ *  (Paraguay: lon -63..-54, lat -28..-19). */
+export function polyInBounds(poly: number[][], bbox: BBox = PRY_BBOX): boolean {
+  const w = Math.floor(bbox[0]), s = Math.floor(bbox[1]), e = Math.ceil(bbox[2]), n = Math.ceil(bbox[3]);
+  return poly.every(([lon, lat]) => lat >= s && lat <= n && lon >= w && lon <= e);
 }
 
 /** Close the ring (the writer decimates and may drop the closing vertex). */
@@ -49,7 +53,8 @@ export function closeRing(poly: number[][]): number[][] {
 }
 
 export type Restored = {
-  zone: "paraguay" | "chaco" | "oriental" | "custom" | "department";
+  /** the country's own area id, one of its region presets, "custom" or "department" */
+  zone: string;
   dep: string | null; // set when zone === "department"
   coords: Coords | null;
   poly: number[][] | null; // set when zone === "custom" and no coords
@@ -63,20 +68,22 @@ export type Restored = {
 
 /**
  * @param departmentIds ids of the loaded departments; null when departments.json is not available
- *   (then a department link falls back to Paraguay, like an unknown id does).
+ *   (then a department link falls back to the whole country, like an unknown id does).
+ * @param country the country's area id, its region preset ids and its bbox (default: Paraguay, Chaco / Oriental)
  */
 export function planRestore(first: string, nMonths: number, s: ShareState, defaultRange: [number, number],
-  departmentIds: readonly string[] | null = null): Restored {
-  let zone: Restored["zone"] = "paraguay";
+  departmentIds: readonly string[] | null = null,
+  country: { area: string; regions: readonly string[]; bbox: BBox } = { area: "paraguay", regions: ["chaco", "oriental"], bbox: PRY_BBOX }): Restored {
+  let zone: Restored["zone"] = country.area;
   let dep: string | null = null;
   let coords: Coords | null = null;
   let poly: number[][] | null = null;
   if (s.c) { zone = "custom"; coords = s.c; }
-  else if (s.poly && polyInBounds(s.poly)) { zone = "custom"; poly = closeRing(s.poly); }
-  else if (s.zone === "chaco" || s.zone === "oriental") zone = s.zone;
+  else if (s.poly && polyInBounds(s.poly, country.bbox)) { zone = "custom"; poly = closeRing(s.poly); }
+  else if (s.zone && country.regions.includes(s.zone)) zone = s.zone;
   else if (s.zone === "department" && s.dep && departmentIds?.includes(s.dep)) { zone = "department"; dep = s.dep; }
   // custom without geometry has nothing to draw, and a department that is unknown or could not be loaded
-  // has no cells: both stay Paraguay
+  // has no cells: both stay the whole country
   return {
     zone, dep, coords, poly,
     month: monthFromLink(first, s.m, nMonths),
