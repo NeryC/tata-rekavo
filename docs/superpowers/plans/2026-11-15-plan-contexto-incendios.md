@@ -7,7 +7,7 @@
 | Etapa | Estado | Evidencia o siguiente paso |
 |---|---|---|
 | 1. Claridad de datos | Terminada; en PR | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
-| 2. Fecha y procedencia | En curso (rama `feat/procedencia-focos`) | Campos tipados, hora local con zona, filtros recientes y detalle accesible. |
+| 2. Fecha y procedencia | Terminada; en PR (rama `feat/procedencia-focos`, issue #30) | 103 pruebas y compilación correctas; navegador en español/inglés a 320, 375 y 1440 px con Paraguay (GMT-3) y Bolivia (GMT-4). Falta comprobar a mano la ventana emergente del foco sobre el mapa (WebGL no se dibuja en el navegador automatizado). |
 | 3. Área quemada | Pendiente | Confirmar acceso, licencia y piloto antes de integrar. |
 | 4. Caso Cerro Corá | Pendiente | Confirmar fuentes, permisos y datos disponibles. |
 | 5. Compartir para verificación | Pendiente | Depende de metadatos fiables de la etapa 2. |
@@ -62,14 +62,14 @@ Actualizar esta tabla al comenzar y terminar cada etapa, con pruebas, PR y bloqu
 
 **Archivos previstos:** `app/src/data.ts`, pruebas de datos, `app/src/MapView.tsx`, `app/src/App.tsx`, `app/src/i18n.ts`, `app/src/urlState.ts` y sus pruebas. Crear un módulo pequeño de filtrado de focos si permite probarlo de forma independiente.
 
-- [ ] Extender `Hotspot` con hora de adquisición, satélite, instrumento, confianza y producto cuando estén disponibles; conservar el CSV original y tratar los campos ausentes como desconocidos, no como cero.
-- [ ] Convertir fecha y hora de adquisición de FIRMS desde UTC de forma explícita y mostrar hora local del país **y zona horaria**. Para horas ausentes o inválidas, mostrar la fecha y «hora no disponible»; no inventar medianoche.
-- [ ] Añadir filtros de mapa «Mes seleccionado», «Últimas 24 horas» y «Últimos 7 días». Los intervalos recientes son ventanas móviles exactas contadas desde el momento actual; no son sinónimos de «hoy» o «ayer».
-- [ ] Mostrar rango horario, última actualización y cantidad filtrada junto al mapa. Si los datos están atrasados, disponibles solo para un intervalo menor o no hay puntos, informar la cobertura y no sugerir vigilancia en tiempo real.
-- [ ] Presentar fecha, hora, satélite y fuente al seleccionar un foco con ratón, tacto o teclado; añadir una alternativa accesible si el mapa no permite seleccionar puntos con teclado.
-- [ ] Mantener independiente el veredicto mensual: filtrar puntos recientes no debe cambiar el total mensual ni atribuirlo al período de 24 horas.
-- [ ] Si se guarda el filtro en la URL, añadirlo de modo compatible y comprobar que enlaces anteriores mantengan el mismo resultado. La descarga debe indicar claramente si respeta el filtro o el rango de análisis.
-- [ ] Cubrir cruces de medianoche y cambio de mes, fecha UTC frente a hora local, valores faltantes, archivos atrasados, selección rápida de país y petición fallida.
+- [x] Extender `Hotspot` con hora de adquisición, satélite, instrumento, confianza y producto cuando estén disponibles; conservar el CSV original y tratar los campos ausentes como desconocidos, no como cero.
+- [x] Convertir fecha y hora de adquisición de FIRMS desde UTC de forma explícita y mostrar hora local del país **y zona horaria**. Para horas ausentes o inválidas, mostrar la fecha y «hora no disponible»; no inventar medianoche.
+- [x] Añadir filtros de mapa «Mes seleccionado», «Últimas 24 horas» y «Últimos 7 días». Los intervalos recientes son ventanas móviles exactas contadas desde el momento actual; no son sinónimos de «hoy» o «ayer».
+- [x] Mostrar rango horario, última actualización y cantidad filtrada junto al mapa. Si los datos están atrasados, disponibles solo para un intervalo menor o no hay puntos, informar la cobertura y no sugerir vigilancia en tiempo real.
+- [x] Presentar fecha, hora, satélite y fuente al seleccionar un foco con ratón, tacto o teclado; añadir una alternativa accesible si el mapa no permite seleccionar puntos con teclado.
+- [x] Mantener independiente el veredicto mensual: filtrar puntos recientes no debe cambiar el total mensual ni atribuirlo al período de 24 horas.
+- [x] Si se guarda el filtro en la URL, añadirlo de modo compatible y comprobar que enlaces anteriores mantengan el mismo resultado. La descarga debe indicar claramente si respeta el filtro o el rango de análisis.
+- [x] Cubrir cruces de medianoche y cambio de mes, fecha UTC frente a hora local, valores faltantes, archivos atrasados, selección rápida de país y petición fallida.
 
 **Aceptación:** un foco del CSV con `acq_date=2026-01-01`, `acq_time=0030` se interpreta como 00:30 UTC y se muestra con su fecha local correcta; el filtro de 24 horas incluye exactamente las detecciones dentro de la ventana y no modifica el conteo mensual. Sin datos visibles, se informa la limitación y no se afirma que no hay incendios.
 

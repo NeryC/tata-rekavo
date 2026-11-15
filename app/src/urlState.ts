@@ -18,6 +18,8 @@ export type ShareState = {
   naive?: boolean;
   newOnly?: boolean;
   metric?: "count" | "frp"; // URL param x; "count" is the default and is not written
+  /** map points of a rolling window (URL param w); absent = the selected month, as in older links */
+  win?: "24h" | "7d";
 };
 
 const MAX_VERTICES = 120;
@@ -61,6 +63,7 @@ export function encodeState(s: ShareState): string {
   if (s.naive) p.set("naive", "1");
   if (s.newOnly) p.set("new", "1");
   if (s.metric === "frp") p.set("x", "frp");
+  if (s.win === "24h" || s.win === "7d") p.set("w", s.win);
   // "," and ";" are legal in a query string; keeping them raw saves ~4 chars per
   // vertex so a 120-vertex polygon stays under 2000 chars. decodeState accepts both.
   return p.toString().replace(/%2C/gi, ",").replace(/%3B/gi, ";");
@@ -127,6 +130,8 @@ export function decodeState(search: string, bboxOf: BBoxOf = pryOnly): ShareStat
   if (p.get("naive") === "1") out.naive = true;
   if (p.get("new") === "1") out.newOnly = true;
   if (p.get("x") === "frp") out.metric = "frp";
+  const w = p.get("w");
+  if (w === "24h" || w === "7d") out.win = w;
 
   return out;
 }

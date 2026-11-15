@@ -190,3 +190,11 @@ test("validateCoords uses the country bbox", () => {
   assert.equal(validateCoords(-17, -63, 25), false);
   assert.equal(validateCoords(-17, -63, 400, bol), false);
 });
+
+test("recent map window round-trips; old links and unknown values show the month", () => {
+  assert.equal(encodeState({ win: "24h" }), "w=24h");
+  assert.deepEqual(decodeState("w=7d"), { win: "7d" });
+  assert.deepEqual(decodeState("m=2026-09"), { m: "2026-09" });
+  assert.deepEqual(decodeState("w=30d"), {});
+  assert.deepEqual(decodeState("w=month"), {});
+});
