@@ -180,6 +180,29 @@ The country median error (7.4 %) is under the 15 % gate. The verdict class match
 
 Same pipeline and commands as Bolivia (`--country URY|PER|ECU --data data/raw/<ISO3> --out data/app/<ISO3>`), each with its own grid, department ranking (geoBoundaries ADM1) and factor regions from `countries.json`. No burn history and no per-hotspot export. Cross-border areas (Pantanal, Chaco, Amazon) are cut at the national border: a country's area covers only its own side.
 
+### Peru
+
+0.25° grid (74 × 52, 1,715 cells with hotspots), 24 departments, 4 RESOLVE biomes as factor regions, FIRMS archives 2000–2025 (2.03 million hotspots scanned) plus the 2026 Area API data. Savannas and flooded grasslands (under 500 hotspots) and mangroves (2,834 hotspots, a strip of Tumbes: 21 cells) are not factor regions; their hotspots use the country factor. Lima is the department of Lima: the Lima region, the Metropolitan Municipality of Lima (Lima Province) and El Callao (146 km², smaller than one grid cell) are merged into it, so there are 24 units, not 25.
+
+| Level | Median error | 90th pct error | Bias |
+|---|---|---|---|
+| Peru × month | 11.3 % | 28.5 % | -1.0 % |
+| Moist forests (Amazon, Yungas) × month | 12.7 % | 37.1 % | 0.3 % |
+| Dry forests (north coast) × month | 47.0 % | 81.5 % | -33.3 % |
+| Highlands (Puna) × month | 28.7 % | 100 % | -3.1 % |
+| Coastal desert × month | 19.5 % | 50.2 % | -3.0 % |
+| 1° block × month | 30.2 % | 74.4 % | -1.0 % |
+| 0.25° cell × month | 41.8 % | 100 % | -1.0 % |
+
+The country median error (11.3 %) is under the 15 % gate. The verdict class matches the one VIIRS would give in 82.6 % of months (country), 63.9 % for 1° blocks; by biome 80.2 % (moist forests), 56.6 % (dry forests), 68.8 % (highlands), 81.4 % (coastal desert). FRP (`frp.json`, not flagged experimental): Peru 15.6 %; moist forests 16.4 %, coastal desert 27.8 %, dry forests 50.8 %, highlands 51.6 %. Mean 2013–2025 vs 2003–2011: naive record ×4.84, harmonized ×0.98.
+
+**Peru limitations.**
+
+- **Three biomes are above 15 %.** Dry forests (47.0 %, bias -33 %), highlands (28.7 %) and coastal desert (19.5 %) have few fires, and the dry forests use the country factor in all 12 calendar months (grid.json `factor_fallback`), as does the coastal desert's Terra factor. Read the error band for those zones.
+- **The Amazon is cut at the border.** The moist-forest area covers only Peru's side of the Amazon basin; fires in Brazil and Bolivia are not counted.
+- **Cell level is coarse.** A 0.25° cell has 41.8 % median error and a 0.1° cell 54.7 %.
+- **Biomes are an approximation.** Factor regions are RESOLVE biomes of the hotspot's 0.05° cell, not a fire-behaviour classification.
+
 ### Uruguay
 
 0.1° grid (50 × 55, 1,728 cells with hotspots), 19 departments, FIRMS archives 2000–2025 (97,392 hotspots scanned) plus the 2026 Area API data. Only one of the four biomes in the bounding box has the 500 vegetation hotspots a factor region needs (tropical and subtropical grasslands, savannas and shrublands: 95,028 hotspots, the "campos"; the others have 125, 99 and 9), so the biome is the whole country: the app offers no separate preset for it and the factors are the country's.
@@ -226,6 +249,7 @@ The verdict class matches the one VIIRS would give in 71.3 % of months (country)
 - **RESOLVE Ecoregions 2017** (846 ecoregions in 14 biomes): https://storage.googleapis.com/teow2016/Ecoregions2017.zip (via https://ecoregions.appspot.com/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the factor regions of the countries outside Paraguay: clipped to Latin America, dissolved into biomes and rasterized at 0.05° (`data/ext/biomes_latam.npz`, see `data/ext/README.md`). Paraguay keeps its Chaco / Oriental split.
   Citation: Dinerstein, E., Olson, D., Joshi, A., Vynne, C., Burgess, N. D., Wikramanayake, E., et al. (2017). An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm. *BioScience* 67(6): 534-545. https://doi.org/10.1093/biosci/bix014
 - **geoBoundaries** gbOpen, Bolivia ADM1 (departments): https://www.geoboundaries.org/ (API: https://www.geoboundaries.org/api/current/gbOpen/BOL/ADM1/). Licence: CC BY 4.0. Retrieved 2026-11-15. Used for the Bolivia department ranking and area selection; boundaries are simplified. Same citation as above.
+- **geoBoundaries** gbOpen, Peru ADM1 (departments): https://www.geoboundaries.org/api/current/gbOpen/PER/ADM1/. Licence: CC BY 4.0. Retrieved 2026-11-15. Same use and citation as Bolivia.
 - **geoBoundaries** gbOpen, Uruguay ADM1 (departments): https://www.geoboundaries.org/api/current/gbOpen/URY/ADM1/. Licence: CC BY 4.0. Retrieved 2026-11-15. Same use and citation as Bolivia.
 - **Indigenous territories:** not included yet. Next step: add them as a second context layer, with fire statistics only, if a source with terms that allow it is found.
 
