@@ -42,6 +42,7 @@ import time
 import urllib.error
 import urllib.request
 import warnings
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, Optional, TypeVar
 
@@ -282,10 +283,19 @@ def write_biomes(path, codes, g: GridSpec, names):
     atomic_replace([path + ".tmp"])
 
 
-@functools.lru_cache(maxsize=4)
+def _biome_path(path=None):
+    """One spelling per raster file (absolute, normalized case), so the caches below hold it once."""
+    return os.path.normcase(os.path.realpath(path or BIOMES_PATH))
+
+
 def load_biomes(path=None) -> Biomes:
+    return _load_biomes(_biome_path(path))
+
+
+@functools.lru_cache(maxsize=4)
+def _load_biomes(path) -> Biomes:
     from scipy import ndimage
-    with np.load(path or BIOMES_PATH, allow_pickle=False) as z:
+    with np.load(path, allow_pickle=False) as z:
         g = GridSpec(float(z["deg"]), float(z["lat0"]), float(z["lon0"]), int(z["rows"]), int(z["cols"]))
         codes = z["codes"].reshape(g.rows, g.cols)
         names = {int(k): str(n) for k, n in zip(z["biome_code"], z["biome_name"])}
@@ -300,7 +310,7 @@ def load_biomes(path=None) -> Biomes:
 
 def biome_at(lat, lon, path=None, fill=True):
     """Biome code of the raster cell of each point (fill=True: sea / lake cells take the nearest biome); 0 outside the raster."""
-    b = load_biomes(path or BIOMES_PATH)
+    b = load_biomes(path)
     lat = np.asarray(lat, dtype=float)
     shape = np.broadcast(lat, np.asarray(lon)).shape
     la, lo = np.broadcast_to(lat, shape).ravel(), np.broadcast_to(np.asarray(lon, dtype=float), shape).ravel()
@@ -312,7 +322,7 @@ def biome_at(lat, lon, path=None, fill=True):
 
 def biome_name_at(lat, lon, path=None, fill=True):
     """Biome name at each point ("" where there is none); a str for scalar input."""
-    names = load_biomes(path or BIOMES_PATH).names
+    names = load_biomes(path).names
     codes = biome_at(lat, lon, path, fill)
     out = np.array([names.get(int(k), "") for k in codes.ravel()], dtype=object).reshape(codes.shape)
     return str(out) if out.shape == () else out
@@ -322,22 +332,26 @@ def biome_region_id(name):
     return dept_slug(name)
 
 
-@functools.lru_cache(maxsize=4)
 def biome_id_table(path=None):
     """Lookup array code (0..255) -> region id (slug of the biome name; "none" for code 0 / unknown codes)."""
+    return _biome_id_table(_biome_path(path))
+
+
+@functools.lru_cache(maxsize=4)
+def _biome_id_table(path):
     lut = np.full(256, "none", dtype=object)
-    for k, n in load_biomes(path or BIOMES_PATH).names.items():
+    for k, n in load_biomes(path).names.items():
         lut[k] = biome_region_id(n)
     return lut.astype(str)
 
 
 def biome_labels(path=None):
-    return {biome_region_id(n): n for n in load_biomes(path or BIOMES_PATH).names.values()}
+    return {biome_region_id(n): n for n in load_biomes(path).names.values()}
 
 
 def biomes_in_box(bbox, path=None):
     """[(code, name)] of the biomes with at least one raster cell centre inside bbox (w, s, e, n), ascending code."""
-    b = load_biomes(path or BIOMES_PATH)
+    b = load_biomes(path)
     g = b.grid
     w, s, e, n = bbox
     c0, c1 = max(0, int(np.ceil((w - g.lon0) / g.deg - 0.5))), min(g.cols, int(np.floor((e - g.lon0) / g.deg - 0.5)) + 1)
@@ -569,13 +583,32 @@ def open_archives(cfg: CountryConfig, data_dir, in_memory=False, with_mask=False
     return Archives(cfg, by_year, daily, daily_flags(daily), mask)
 
 
+def country_regions(cfg: CountryConfig, daily: DailyCounts) -> CountryConfig:
+    """Biome countries without an explicit regions.names: keep the bbox biomes with at least min_hotspots vegetation
+    hotspots in the archives (any sensor, any year), so a neighbour's biome in a corner of the bbox does not become a
+    factor region. Fewer hotspots could never give the biome its own factor anyway; its hotspots use the country factor.
+    Any other config is returned unchanged."""
+    if cfg.regions.get("kind") != "biome" or "names" in cfg.regions:
+        return cfg
+    n = daily.df.groupby("region").n.sum()
+    keep = [r for r in cfg.region_names if int(n.get(r, 0)) >= cfg.factor_min_hotspots]
+    dropped = [r for r in cfg.region_names if r not in keep]
+    if dropped:
+        log(f"{cfg.iso3}: biomes with fewer than {cfg.factor_min_hotspots} hotspots left out of the factor regions: " + ", ".join(dropped))
+    return dataclasses.replace(cfg, regions={**cfg.regions, "names": keep})
+
+
 def _in_memory(args):
     return bool(getattr(args, "in_memory", False))
 
 
-def _merge_parts(parts):
-    """Concatenate per-year groupby results and sum equal keys (keys of different years never coincide, so this only sorts)."""
+def _merge_parts(parts, names):
+    """Concatenate per-year groupby results and sum equal keys (keys of different years never coincide, so this only sorts).
+    names: the index level names, for the empty result when there is no row at all."""
     parts = [p for p in parts if len(p)] or parts[:1]
+    if not parts:
+        return pd.Series([], dtype=float, index=pd.MultiIndex.from_arrays([[]] * len(names), names=names)
+                         if len(names) > 1 else pd.Index([], name=names[0]))
     if len(parts) == 1:
         return parts[0]
     s = pd.concat(parts)
@@ -736,7 +769,7 @@ def cmd_build(args):
     grid = cfg.grid
     os.makedirs(args.out, exist_ok=True)
     arch = open_archives(cfg, args.data, in_memory=_in_memory(args), with_mask=True)
-    flags = arch.flags
+    cfg, flags = country_regions(cfg, arch.daily), arch.flags
     f, clean_days = compute_factors(arch.daily, flags, regions=cfg.region_names, min_hotspots=cfg.factor_min_hotspots)
     areas = [(cfg.area, None)] + [(reg, reg) for reg in cfg.region_names]
     h_p, modis_p, viirs_p, fill_p, hist_p = [], [], [], [], []
@@ -767,7 +800,7 @@ def cmd_build(args):
             hist_p.append(pd.DataFrame({"k": fg.index(fr, fc)[fok], "y": v.year.values[fok]}).drop_duplicates())
 
     # --- grid x month table
-    t = pd.DataFrame({"h": _merge_parts(h_p), "modis": _merge_parts(modis_p), "viirs": _merge_parts(viirs_p)}).fillna(0)
+    t = pd.DataFrame({"h": _merge_parts(h_p, ["cell", "m"]), "modis": _merge_parts(modis_p, ["cell", "m"]), "viirs": _merge_parts(viirs_p, ["cell", "m"])}).fillna(0)
     t = t[(t.h > 0) | (t.modis > 0) | (t.viirs > 0)].reset_index()
     cells = []
     for cell, grp in t.groupby("cell"):
@@ -793,7 +826,7 @@ def cmd_build(args):
     log(f"grid.json: {len(cells)} cells, {len(t):,} cell-months, {n_months} months")
 
     # --- outage / fill log
-    fill_days = _merge_parts(fill_p).reset_index()
+    fill_days = _merge_parts(fill_p, ["date", "hsrc"]).reset_index()
     fill_days["date"] = fill_days.date.dt.strftime("%Y-%m-%d")
     with open(os.path.join(args.out, "gaps.json"), "w") as fh:
         json.dump({"rules": {"snpp_out": f"S-NPP=0 and (NOAA-20>={SNPP_OUT_N20} or Aqua>={SNPP_OUT_AQUA})",
@@ -805,8 +838,8 @@ def cmd_build(args):
     rows = []
     for name, _ in areas:
         hp, mp, vp = series_p[name]
-        s = pd.DataFrame({"harmonized": _merge_parts(hp), "modis_raw": _merge_parts(mp),
-                          "viirs_snpp_raw": _merge_parts(vp)}).reindex(range(n_months)).fillna(0)
+        s = pd.DataFrame({"harmonized": _merge_parts(hp, ["m"]), "modis_raw": _merge_parts(mp, ["m"]),
+                          "viirs_snpp_raw": _merge_parts(vp, ["m"])}).reindex(range(n_months)).fillna(0)
         for m_, rr in s.iterrows():
             y, mo = index_to_ym(m_)
             rows.append([name, y, mo, round(rr.harmonized, 1), int(rr.modis_raw), int(rr.viirs_snpp_raw)])
@@ -883,6 +916,7 @@ def season_percentiles(cum):
 def cmd_build_season(args):
     cfg = load_country(args.country)
     arch = open_archives(cfg, args.data, in_memory=_in_memory(args))
+    cfg = country_regions(cfg, arch.daily)
     f, _ = compute_factors(arch.daily, arch.flags, regions=cfg.region_names, min_hotspots=cfg.factor_min_hotspots)
     dp = os.path.join(args.out, "departments.json")
     cell_dept = None
@@ -1029,16 +1063,20 @@ def systematic_by_year(v, clean_days, f, value_col: Optional[str] = None, daily:
     return {int(y): round(float(abs(rec_ta[y] / rec_a[y] - 1)), 3) for y in rec_a.index}
 
 
-def validation_rows(arch: Archives, clean_days, weights: Optional[Callable] = None):
-    """The hotspots the validation needs, collected one year at a time: S-NPP and Aqua on clean overlap days (hold-out
-    pairs) and MODIS before VIIRS_START (systematic term). weights(v) may add columns to each yearly frame first."""
-    parts = []
-    for v in arch.frames():
-        if weights is not None:
-            weights(v)
-        keep = ((v.date.isin(clean_days) & v.sensor.isin(["snpp", "aqua"])).values |
-                ((v.m >= 0) & (v.m < VIIRS_START_IDX) & v.sensor.isin(["aqua", "terra"])).values)
-        parts.append(v[keep])
+VALIDATION_COLUMNS = ["latitude", "longitude", "date", "year", "month", "m", "sensor", "region", "frp"]
+
+
+def validation_subset(v, clean_days):
+    """The rows and columns of one (yearly) frame the validation needs: S-NPP and Aqua on clean overlap days (hold-out
+    pairs) and MODIS before VIIRS_START (systematic term); position, date keys, sensor, region and FRP only."""
+    keep = ((v.date.isin(clean_days) & v.sensor.isin(["snpp", "aqua"])).values |
+            ((v.m >= 0) & (v.m < VIIRS_START_IDX) & v.sensor.isin(["aqua", "terra"])).values)
+    return v.loc[keep, [c for c in VALIDATION_COLUMNS if c in v.columns]]
+
+
+def validation_rows(arch: Archives, clean_days):
+    """validation_subset of every year, collected one year at a time."""
+    parts = [validation_subset(v, clean_days) for v in arch.frames()]
     return pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
 
 
@@ -1063,12 +1101,14 @@ def cmd_validate(args):
     from scipy.stats import spearmanr
 
     cfg = load_country(args.country)
-    regions, mh = cfg.region_names, cfg.factor_min_hotspots
     arch = open_archives(cfg, args.data, in_memory=_in_memory(args))
+    cfg = country_regions(cfg, arch.daily)
+    regions, mh = cfg.region_names, cfg.factor_min_hotspots
     flags, daily = arch.flags, arch.daily
     _, clean_days = compute_factors(daily, flags, regions=regions, min_hotspots=mh)
     v = validation_rows(arch, clean_days)
     c = validation_frame(v, clean_days, cfg)
+    v = v[(v.m < VIIRS_START_IDX).values]   # what is left for the systematic term: MODIS before VIIRS_START
     levels = validation_levels(cfg)
 
     # leave-one-year-out
@@ -1180,9 +1220,10 @@ def cmd_build_frp(args):
     sum MODIS FRP per region x calendar month on clean overlap days), own leave-one-year-out validation."""
     t0 = time.time()
     cfg = load_country(args.country)
-    regions, mh = cfg.region_names, cfg.factor_min_hotspots
     os.makedirs(args.out, exist_ok=True)
     arch = open_archives(cfg, args.data, in_memory=_in_memory(args))
+    cfg = country_regions(cfg, arch.daily)
+    regions, mh = cfg.region_names, cfg.factor_min_hotspots
     flags, daily = arch.flags, arch.daily
     f, clean_days = compute_factors(daily, flags, value_col="frp", regions=regions, min_hotspots=mh)
 
@@ -1190,9 +1231,7 @@ def cmd_build_frp(args):
     t_p, val_p, n_months = [], [], 0
     for v in arch.frames():
         v["w"], v["hsrc"] = harmonized_weights(v, flags, f, value_col="frp")
-        keep = ((v.date.isin(clean_days) & v.sensor.isin(["snpp", "aqua"])).values |
-                ((v.m >= 0) & (v.m < VIIRS_START_IDX) & v.sensor.isin(["aqua", "terra"])).values)
-        val_p.append(v[keep])
+        val_p.append(validation_subset(v, clean_days))
         v = v[v.m >= 0]
         if not len(v):
             continue
@@ -1205,6 +1244,7 @@ def cmd_build_frp(args):
 
     # leave-one-year-out validation + error model, exactly as for the counts
     c = validation_frame(v, clean_days, cfg)
+    v = v[(v.m < VIIRS_START_IDX).values]   # what is left for the systematic term: MODIS before VIIRS_START
     pairs = loyo_pairs(daily, flags, c, validation_levels(cfg), value_col="frp", regions=regions, min_hotspots=mh)
     loyo = {}
     for name, level in [(cfg.area, "country")] + [(reg, reg) for reg in cfg.region_names]:
@@ -1215,7 +1255,7 @@ def cmd_build_frp(args):
     em = error_model_doc(ec, ep, bstat, sys_by_year, "harmonized FRP (MW)")
 
     # cell x month FRP grid, same cell / month index as grid.json
-    t = _merge_parts(t_p).rename("frp").reset_index()
+    t = _merge_parts(t_p, ["cell", "m"]).rename("frp").reset_index()
     cells = frp_cells(t)
     meta = {
         "name": f"Tata Rekavo harmonized Fire Radiative Power - {cfg.name} (experimental)",
@@ -1417,6 +1457,7 @@ def cmd_export_hotspots(args):
         log(f"export-hotspots is disabled for {cfg.iso3} (countries.json export_hotspots = false)")
         return
     v = prepare_hotspots(load_archives(args.data, cfg.firms_name), cfg)
+    cfg = country_regions(cfg, daily_counts(v))
     flags = daily_flags(v)
     f, _ = compute_factors(v, flags, regions=cfg.region_names, min_hotspots=cfg.factor_min_hotspots)
     v["w"], v["hsrc"] = harmonized_weights(v, flags, f)
@@ -1721,9 +1762,11 @@ def _harmonized_hotspots(cfg, data_dir, current_csv, in_memory=False):
     """Every vegetation-fire hotspot with its harmonized count weight `n` and harmonized FRP weight `frp`, from the archives
     (same loader, outage rules and factors as build / build-frp), plus the observed 2026 months of current_hotspots.csv
     (weight 1, FRP as observed). Returns (frame[latitude, longitude, m, n, frp, region], last month "YYYY-MM",
-    last day "YYYY-MM-DD": the latest hotspot date of current_hotspots.csv, or the end of the last archive month).
+    last day "YYYY-MM-DD": the latest hotspot date of current_hotspots.csv, or the end of the last archive month,
+    the config with its factor regions as used (country_regions)).
     The archives are read one year at a time; only the hotspots with a weight are kept, in six columns."""
     arch = open_archives(cfg, data_dir, in_memory=in_memory)
+    cfg = country_regions(cfg, arch.daily)
     flags, mh = arch.flags, cfg.factor_min_hotspots
     f, _ = compute_factors(arch.daily, flags, regions=cfg.region_names, min_hotspots=mh)
     ff, _ = compute_factors(arch.daily, flags, value_col="frp", regions=cfg.region_names, min_hotspots=mh)
@@ -1756,7 +1799,7 @@ def _harmonized_hotspots(cfg, data_dir, current_csv, in_memory=False):
             through_day = d.max().date().isoformat()
     else:
         log(f"{current_csv} missing: statistics end with the archive ({through})")
-    return v.reset_index(drop=True), through, through_day
+    return v.reset_index(drop=True), through, through_day, cfg
 
 
 def cmd_build_context(args):
@@ -1774,7 +1817,7 @@ def cmd_build_context(args):
             cell_dept = {int(cl): d["id"] for d in json.load(fh)["departments"] for cl in d["cells"]}
     else:
         log("departments.json missing: no department zones or overlaps")
-    h, through, through_day = _harmonized_hotspots(cfg, args.data, os.path.join(args.out, "current_hotspots.csv"), _in_memory(args))
+    h, through, through_day, cfg = _harmonized_hotspots(cfg, args.data, os.path.join(args.out, "current_hotspots.csv"), _in_memory(args))
     g = cfg.grid
     r, c, ok = cell_of(h.latitude.values, h.longitude.values, g)
     cell = np.where(ok, g.index(r, c), -1)

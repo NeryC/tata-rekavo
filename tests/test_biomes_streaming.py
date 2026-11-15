@@ -102,12 +102,14 @@ def test_write_and_load_biome_raster_roundtrip(tmp_path):
 
 # ----------------------------------------------------------------------------- biome regions in the country config
 def _biome_npz(tmp_path):
-    """Synthetic raster over the Paraguay box: west of -58.5 'Alpha forests' (1), east 'Beta grasslands' (7)."""
+    """Synthetic raster over the Paraguay box: west of -58.5 'Alpha forests' (1), east 'Beta grasslands' (7), and a
+    'Gamma desert' (13) corner inside the bbox (lat -27.7..-27.5, lon -62.8..-62.5) where the synthetic archives have no hotspot."""
     g = GridSpec(0.05, -28.0, -63.0, 180, 180)
     codes = np.ones((180, 180), np.uint8)
     codes[:, 90:] = 7
+    codes[6:10, 4:10] = 13
     p = tmp_path / "biomes.npz"
-    firms_pipeline.write_biomes(p, codes, g, {1: "Alpha forests", 7: "Beta grasslands"})
+    firms_pipeline.write_biomes(p, codes, g, {1: "Alpha forests", 7: "Beta grasslands", 13: "Gamma desert"})
     return p
 
 
@@ -119,7 +121,7 @@ def _biome_cfg(tmp_path, **regions):
 
 def test_region_of_biome_returns_biome_ids(tmp_path):
     cfg = _biome_cfg(tmp_path)
-    assert cfg.region_names == ["alpha-forests", "beta-grasslands"]
+    assert cfg.region_names == ["alpha-forests", "beta-grasslands", "gamma-desert"]   # every biome in the bbox
     assert cfg.region_label("beta-grasslands") == "Beta grasslands"
     assert list(region_of(np.array([-22.0, -22.0]), np.array([-60.0, -56.0]), cfg)) == ["alpha-forests", "beta-grasslands"]
     assert cfg.factor_min_hotspots == 500
@@ -145,8 +147,10 @@ def test_bolivia_entry():
     assert c.lon0 <= w and c.lat0 <= s and c.lon0 + c.cols * c.deg >= e and c.lat0 + c.rows * c.deg >= n
     assert c.rows * c.cols < 15_000
     assert c.mask_grid.lat0 == c.lat0 and c.mask_grid.rows * c.mask_grid.deg == pytest.approx(c.rows * c.deg)
-    names = c.region_names
-    assert "tropical-subtropical-moist-broadleaf-forests" in names and "montane-grasslands-shrublands" in names
+    assert c.region_names == ["tropical-subtropical-moist-broadleaf-forests", "tropical-subtropical-dry-broadleaf-forests",
+                              "tropical-subtropical-grasslands-savannas-shrublands", "flooded-grasslands-savannas",
+                              "montane-grasslands-shrublands"]   # explicit: the Atacama corner of the bbox is Chile
+    assert set(c.region_names) < {firms_pipeline.biome_region_id(n) for _, n in firms_pipeline.biomes_in_box(c.bbox)}
     assert c.region_label("tropical-subtropical-moist-broadleaf-forests") == MOIST
     assert str(region_of(-16.6, -68.4, c)) == "montane-grasslands-shrublands"
 
@@ -331,3 +335,60 @@ def test_streaming_reads_one_year_at_a_time(tmp_path, monkeypatch):
     firms_pipeline.cmd_build(argparse.Namespace(country="TST", data=str(data), out=str(tmp_path / "o"), in_memory=False))
     assert seen and all(len(y) == 1 for y in seen)          # never two years in one frame
     assert {y[0] for y in seen} == {"2011", "2012"}
+
+
+# ----------------------------------------------------------------------------- fix round 1
+def test_country_regions_keep_only_biomes_with_hotspots(tmp_path):
+    cfg = _biome_cfg(tmp_path)
+    rows = [(pd.Timestamp("2013-03-10"), "alpha-forests", "snpp", 900), (pd.Timestamp("2013-03-11"), "beta-grasslands", "aqua", 500),
+            (pd.Timestamp("2013-03-11"), "gamma-desert", "snpp", 499)]
+    daily = firms_pipeline.DailyCounts(pd.DataFrame(rows, columns=["date", "region", "sensor", "n"]))
+    got = firms_pipeline.country_regions(cfg, daily)
+    assert got.region_names == ["alpha-forests", "beta-grasslands"]      # < 500 hotspots in the whole archive: dropped
+    assert got.regions["kind"] == "biome" and cfg.region_names[-1] == "gamma-desert"   # the input config is unchanged
+    fixed = _biome_cfg(tmp_path, names=["gamma-desert"])
+    assert firms_pipeline.country_regions(fixed, daily) is fixed             # explicit names are kept as they are
+    assert firms_pipeline.country_regions(load_country("PRY"), daily).region_names == ["chaco", "oriental"]
+
+
+def test_streaming_build_drops_biomes_without_hotspots(tmp_path, monkeypatch):
+    data = _write_archives(tmp_path / "raw")
+    entry = _entry(firms_name="Testland", regions={"kind": "biome", "source": str(_biome_npz(tmp_path)), "min_hotspots": 500})
+    monkeypatch.setattr(firms_pipeline, "COUNTRIES_PATH", str(_countries(tmp_path, {"TST": entry})))
+    out = tmp_path / "o"
+    firms_pipeline.cmd_build(argparse.Namespace(country="TST", data=str(data), out=str(out), in_memory=False))
+    g = json.loads((out / "grid.json").read_text(encoding="utf-8"))
+    assert g["meta"]["regions"]["names"] == ["alpha-forests", "beta-grasslands"]
+    assert set(pd.read_csv(out / "series_regions.csv").area) == {"paraguay", "alpha-forests", "beta-grasslands"}
+
+
+def test_biome_raster_path_is_cached_once():
+    a = firms_pipeline.load_biomes()
+    assert firms_pipeline.load_biomes(firms_pipeline.BIOMES_PATH) is a
+    assert firms_pipeline.load_biomes(str(Path(firms_pipeline.BIOMES_PATH))) is a
+    rel = Path(firms_pipeline.BIOMES_PATH).relative_to(Path.cwd()) if Path.cwd() in Path(firms_pipeline.BIOMES_PATH).parents else None
+    if rel is not None:
+        assert firms_pipeline.load_biomes(str(rel)) is a
+    assert firms_pipeline.biome_id_table() is firms_pipeline.biome_id_table(firms_pipeline.BIOMES_PATH)
+
+
+def test_merge_parts_handles_zero_rows():
+    empty = firms_pipeline._merge_parts([], ["cell", "m"])
+    assert len(empty) == 0 and list(empty.index.names) == ["cell", "m"]
+    assert len(firms_pipeline._merge_parts([], ["m"])) == 0
+    idx = pd.MultiIndex.from_tuples([(1, 2)], names=["cell", "m"])
+    one = pd.Series([3.0], index=idx)
+    none = pd.Series([], dtype=float, index=pd.MultiIndex.from_tuples([], names=["cell", "m"]))
+    assert firms_pipeline._merge_parts([none, one, none], ["cell", "m"]).equals(one)
+    assert len(firms_pipeline._merge_parts([none, none], ["cell", "m"])) == 0
+
+
+def test_validation_rows_keep_only_the_needed_columns(tmp_path, monkeypatch):
+    data = _write_archives(tmp_path / "raw")
+    monkeypatch.setattr(firms_pipeline, "COUNTRIES_PATH", str(_countries(tmp_path, {"TST": _entry(firms_name="Testland")})))
+    cfg = load_country("TST")
+    arch = firms_pipeline.open_archives(cfg, str(data))
+    _, clean = firms_pipeline.compute_factors(arch.daily, arch.flags, regions=cfg.region_names)
+    v = firms_pipeline.validation_rows(arch, clean)
+    assert list(v.columns) == ["latitude", "longitude", "date", "year", "month", "m", "sensor", "region", "frp"]
+    assert set(v.sensor) <= {"snpp", "aqua", "terra"}

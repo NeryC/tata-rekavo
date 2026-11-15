@@ -47,7 +47,10 @@
     "regions": {
       "kind": "biome",
       "source": "data/ext/biomes_latam.npz",
-      "min_hotspots": 500
+      "min_hotspots": 500,
+      "names": ["tropical-subtropical-moist-broadleaf-forests", "tropical-subtropical-dry-broadleaf-forests",
+                "tropical-subtropical-grasslands-savannas-shrublands", "flooded-grasslands-savannas",
+                "montane-grasslands-shrublands"]
     },
     "export_hotspots": false,
     "burn_history": false,
