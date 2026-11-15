@@ -39,6 +39,8 @@ export interface CountryInfo {
   tzCity?: string;
   /** example point [lat, lon] of the coordinates form */
   example?: [number, number];
+  /** country median error above the 15 % gate: the selector tags it as a pilot */
+  pilot?: boolean;
 }
 export interface CountriesIndex { default: string; countries: CountryInfo[] }
 

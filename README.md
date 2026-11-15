@@ -190,7 +190,7 @@ The country median error (7.4 %) is under the 15 % gate. The verdict class match
 
 ## More countries (Uruguay, Peru, Ecuador)
 
-Same pipeline and commands as Bolivia (`--country URY|PER|ECU --data data/raw/<ISO3> --out data/app/<ISO3>`), each with its own grid, department ranking (geoBoundaries ADM1) and factor regions from `countries.json`. No burn history and no per-hotspot export. Cross-border areas (Pantanal, Chaco, Amazon) are cut at the national border: a country's area covers only its own side.
+Same pipeline and commands as Bolivia (`--country URY|PER|ECU --data data/raw/<ISO3> --out data/app/<ISO3>`), each with its own grid, department ranking (geoBoundaries ADM1) and factor regions from `countries.json`. Uruguay and Ecuador also have the burn history ("fire in new places") and the per-hotspot export (`hotspots/`); Peru and Bolivia do not yet (size). Uruguay and Ecuador, whose country median error is above the 15 % gate, are tagged "pilot" in the country selector. Cross-border areas (Pantanal, Chaco, Amazon) are cut at the national border: a country's area covers only its own side.
 
 ### Ecuador
 

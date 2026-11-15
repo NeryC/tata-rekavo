@@ -305,7 +305,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
         const next = countries.find((c) => c.iso3 === e.target.value);
         if (next && next.iso3 !== country.iso3) onCountry(next, data && month >= 0 && month !== data.grid.nMonths - 1 ? indexToMonth(data.grid.meta.months.first, month) : null);
       }}>
-      {countries.map((c) => <option key={c.iso3} value={c.iso3}>{c.name[lang]}</option>)}
+      {countries.map((c) => <option key={c.iso3} value={c.iso3}>{c.pilot ? t.pilotCountry(c.name[lang]) : c.name[lang]}</option>)}
     </select>
   );
 
