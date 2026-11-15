@@ -62,9 +62,17 @@ export interface ProtectedSeries { m: number[]; n: number[]; frp: number[] }
 export interface ProtectedAreaRecord extends ProtectedSeries {
   id: string; name: string; desig: string; desig_type: string; iucn: string;
   departments: string[]; regions: ("chaco" | "oriental")[];
+  /** the area's own series restricted to one department or region (inside the area AND the zone); only zones where it is not empty */
+  by_zone: Record<string, ProtectedSeries>;
 }
 export interface ContextFile {
-  meta: { source: string; citation: string; terms: string; through: string; first: string; generated: string; unit: string; overlap_note: string };
+  meta: {
+    source: string; citation: string; terms: string; through: string; first: string; generated: string; unit: string; overlap_note: string;
+    /** last day of data behind the figures, "YYYY-MM-DD" */
+    through_day?: string;
+    /** when the WDPA release was downloaded, "YYYY-MM-DD" */
+    retrieved: string;
+  };
   areas: ProtectedAreaRecord[];
   zones: Record<string, ProtectedSeries>;
 }

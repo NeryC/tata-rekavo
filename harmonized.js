@@ -315,6 +315,8 @@ function uniqueAreas(context) {
   return list;
 }
 
+const NO_SERIES = { m: [], n: [], frp: [] };
+
 /** Value of a sparse series ({m, <field>}) at month m: a month that is not listed is 0. */
 function sparseAt(series, field, m) {
   const k = series.m.indexOf(m);
@@ -328,9 +330,11 @@ function sparseAt(series, field, m) {
  *   (a custom area has no protected-area figures) and when m is later than context.meta.through: the figures stop there
  *   and are never reused for a later month.
  * - metric: "count" uses n (hotspots), "frp" uses frp (MW).
+ * - Per-area values for a department or region zone come from the area's `by_zone[zoneId]` series (hotspots inside the area AND inside
+ *   that zone), so an area that spreads over several zones only contributes its fire in this one; a zone missing from by_zone is 0.
+ *   For "paraguay" the area's whole series is used.
  * - inside: the zone's value for that month from context.zones, which is the UNION of the areas (each hotspot once).
  *   Areas overlap and hotspots count in every area that holds them, so the areas' values can add up to more than inside.
- *   An area that crosses the zone's limits is listed with its whole value.
  * - areas: the areas that overlap the zone (all for paraguay; by `regions` for chaco/oriental, by `departments` for a department),
  *   repeated records removed, sorted by value descending (then name). Each: {id, name, desig, value, median, ratio, classId}.
  *   ratio is value / median of the same calendar month in the area's previous years (missing months count as 0), the median scaled
@@ -352,9 +356,10 @@ export function protectedSummary(context, zoneId, m, metric = "count", coverage 
   const areas = uniqueAreas(context)
     .filter((a) => zoneId === "paraguay" || (zoneId === "chaco" || zoneId === "oriental" ? a.regions.includes(zoneId) : a.departments.includes(zoneId)))
     .map((a) => {
-      const value = sparseAt(a, field, m);
+      const ser = zoneId === "paraguay" ? a : (a.by_zone?.[zoneId] ?? NO_SERIES);
+      const value = sparseAt(ser, field, m);
       const history = [];
-      for (let k = m - 12; k >= 0; k -= 12) history.push(sparseAt(a, field, k));
+      for (let k = m - 12; k >= 0; k -= 12) history.push(sparseAt(ser, field, k));
       const med = history.length ? median(history) * coverage : null;
       const ratio = med !== null && med > 0 ? value / med : null;
       return {

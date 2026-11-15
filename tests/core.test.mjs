@@ -462,10 +462,15 @@ test("departmentRanking: the low-signal threshold is a parameter (default 10, 10
 function ctxOf(areas, zones, through = "2006-09") {
   return { meta: { first: "2002-07", through }, areas, zones };
 }
-const area = (id, name, series, extra = {}) => ({
-  id, name, desig: "National Park", desig_type: "National", iucn: "II", departments: ["d1"], regions: ["chaco"],
-  m: series.map(([m]) => m), n: series.map(([, n]) => n), frp: series.map(([, n]) => n * 10), ...extra,
-});
+const area = (id, name, series, extra = {}) => {
+  const a = {
+    id, name, desig: "National Park", desig_type: "National", iucn: "II", departments: ["d1"], regions: ["chaco"],
+    m: series.map(([m]) => m), n: series.map(([, n]) => n), frp: series.map(([, n]) => n * 10), ...extra,
+  };
+  // by default the area lies wholly inside each zone it lists
+  a.by_zone ??= Object.fromEntries([...a.departments, ...a.regions].map((z) => [z, { m: a.m, n: a.n, frp: a.frp }]));
+  return a;
+};
 
 test("protectedSummary: ratio against the median of the same calendar month in previous years, missing months count as 0", () => {
   // history for m = 50: m 38 -> 10, m 26 -> missing (0), m 14 -> 30, m 2 -> 20 => median of [10, 0, 30, 20] = 15
@@ -553,7 +558,40 @@ test("protectedSummary: reads the real context.json (Paraguay, Sep 2024 and the 
   assert.equal(s.areas.length, distinct.size);
   assert.ok(s.inside > 1000);
   assert.ok(s.areas.every((a, i, l) => i === 0 || l[i - 1].value >= a.value));
+  // department zone: every area's value is within the department's union total
+  const z = protectedSummary(ctx, "boqueron", sep24, "count", 1, { classes: meta.classes });
+  assert.ok(z.areas.every((a) => a.value <= z.inside + 1e-6));
   const [ty, tm] = ctx.meta.through.split("-").map(Number);
   assert.notEqual(protectedSummary(ctx, "paraguay", indexOf(meta, ty, tm)), null);
   assert.equal(protectedSummary(ctx, "paraguay", indexOf(meta, ty, tm) + 1), null);
+});
+
+test("protectedSummary: in a department or region an area counts only the fire inside that zone (by_zone), with its own history", () => {
+  // a big reserve across d1 and d2: this month 100 in d2 and 5 in d1; last year 40 in d1 and 10 in d2
+  const big = area("b", "Big", [[38, 50], [50, 105]], {
+    departments: ["d1", "d2"], regions: ["chaco"],
+    by_zone: {
+      chaco: { m: [38, 50], n: [50, 105], frp: [500, 1050] },
+      d1: { m: [38, 50], n: [40, 5], frp: [400, 50] },
+      d2: { m: [38, 50], n: [10, 100], frp: [100, 1000] },
+    },
+  });
+  const ctx = ctxOf([big], {
+    paraguay: { m: [50], n: [105], frp: [1050] }, chaco: { m: [50], n: [105], frp: [1050] },
+    d1: { m: [50], n: [5], frp: [50] }, d2: { m: [50], n: [100], frp: [1000] },
+  });
+  const row = (z, metric = "count") => protectedSummary(ctx, z, 50, metric, 1, { classes: meta.classes }).areas[0];
+  assert.deepEqual([row("d1").value, row("d1").median, row("d1").ratio, row("d1").classId], [5, 0, null, null]); // m 14, 26, 2 are 0 in d1 too
+  assert.equal(row("d2").value, 100);
+  assert.equal(row("paraguay").value, 105);          // the whole series
+  assert.equal(row("chaco").value, 105);
+  assert.equal(row("d2", "frp").value, 1000);
+  // no area value exceeds the zone's own total
+  for (const z of ["d1", "d2", "chaco"]) assert.ok(row(z).value <= ctx.zones[z].n[0]);
+});
+
+test("protectedSummary: an area listed for a department but with no fire there has value 0 and does not borrow the whole series", () => {
+  const a = area("a", "A", [[50, 30]], { departments: ["d1", "d2"], by_zone: { d1: { m: [50], n: [30], frp: [300] }, chaco: { m: [50], n: [30], frp: [300] } } });
+  const ctx = ctxOf([a], { paraguay: { m: [50], n: [30], frp: [300] }, d1: { m: [50], n: [30], frp: [300] }, d2: { m: [], n: [], frp: [] } });
+  assert.equal(protectedSummary(ctx, "d2", 50).areas[0].value, 0);
 });

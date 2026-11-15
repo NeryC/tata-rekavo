@@ -7,6 +7,7 @@ import SeasonChart from "./SeasonChart";
 import ValidationPanel from "./ValidationPanel";
 import DepartmentRanking from "./DepartmentRanking";
 import ProtectedAreas from "./ProtectedAreas";
+import { isContextStale } from "./contextCheck";
 import { rangeAnalytics } from "./analytics";
 import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
@@ -28,7 +29,6 @@ const REPO = "https://github.com/NeryC/tata-rekavo";
 const GEOBOUNDARIES = "https://www.geoboundaries.org/";
 const GEOBOUNDARIES_RETRIEVED = "2026-11-14"; // shown when departments.json did not load
 const WDPA_URL = "https://www.protectedplanet.net/country/PRY";
-const WDPA_RETRIEVED = "2026-11-14";
 const MAX_ROWS = 1_500_000;
 // a typical month under 100 MW is too little fire to rank by ratio (counts use 10 hotspots, MW run about ten times higher)
 const FRP_LOW_SIGNAL_MEDIAN = 100;
@@ -290,12 +290,16 @@ export default function App() {
   const protZone = zoneKind === "department" ? department?.id ?? null : zoneKind === "custom" ? null : zoneKind;
   const protThrough = context ? context.meta.through.split("-").map(Number) : null;
   const protThroughIdx = protThrough ? H.indexOf(meta, protThrough[0], protThrough[1]) : -1;
-  const protSummary = context && protZone && !v.noData
+  // the daily workflow refreshes current.json but cannot rebuild context.json: figures of the last month can lag behind the data shown
+  const lastHotspotDate = data.hotspots.reduce<string | null>((mx, h) => (mx === null || h.date > mx ? h.date : mx), null);
+  const protStale = !!context && month === protThroughIdx && isContextStale(context, lastHotspotDate, data.current?.generated);
+  const protSummary = context && protZone && !v.noData && !protStale
     ? H.protectedSummary(context, protZone, month, active, cov, { classes: meta.classes, zoneValue: v.value, lowSignalMedian: active === "frp" ? FRP_LOW_SIGNAL_MEDIAN : 10 }) : null;
-  const protNote = !context || v.noData ? null : zoneKind === "custom" ? "custom" : month > protThroughIdx ? "late" : null;
+  const protNote = !context || v.noData ? null : zoneKind === "custom" ? "custom" : month > protThroughIdx ? "late" : protStale ? "stale" : null;
   const protTop = protSummary ? protSummary.areas.filter((a) => a.value >= 0.5).slice(0, 3) : [];
-  const protShare = protSummary?.share != null
-    ? Math.round(protSummary.share * 100).toLocaleString(lang === "es" ? "es-PY" : "en-US") : null;
+  const protPct = protSummary?.share != null ? protSummary.share * 100 : null;
+  // a share under 1 % must not round to "0 %" next to a non-zero count
+  const protShare = protPct === null ? null : protPct > 0 && protPct < 1 ? "<1" : Math.round(protPct).toLocaleString(lang === "es" ? "es-PY" : "en-US");
   const ml = (m: number) => { const o = H.monthOf(meta, m); return i18n.monthLabel(o.year, o.month); };
   const { year: selYear, month: selMonth } = H.monthOf(meta, month);
   const monthLabel = ml(month);
@@ -495,6 +499,7 @@ export default function App() {
                 </p>
               )}
               {protNote === "late" && <p className="v-prot">{t.protLate(ml(protThroughIdx))}</p>}
+              {protNote === "stale" && context && <p className="v-prot">{t.protStale(context.meta.through_day ?? context.meta.generated.slice(0, 10))}</p>}
               </>)}
               <details>
                 <summary>{t.whatIsHotspot}</summary>
@@ -506,7 +511,7 @@ export default function App() {
 
             {context && (protSummary || protNote) && (
               <ProtectedAreas summary={protSummary} note={protNote} zoneLabel={zoneLabel} source={context.meta.source} coverage={cov}
-                throughLabel={ml(protThroughIdx)} />
+                throughLabel={ml(protThroughIdx)} asOf={context.meta.through_day ?? context.meta.generated.slice(0, 10)} />
             )}
 
             {ranking && ranking.length > 0 && (
@@ -628,10 +633,11 @@ export default function App() {
                   <a href={GEOBOUNDARIES} target="_blank" rel="noreferrer">geoboundaries.org</a>
                 </p>
                 {context && (
-                  <p>{t.footWdpa(context.meta.citation, WDPA_RETRIEVED)}{" "}
+                  <p>{t.footWdpa(context.meta.citation, context.meta.retrieved)}{" "}
                     <a href={WDPA_URL} target="_blank" rel="noreferrer">{WDPA_URL}</a>. {t.footWdpaTerms}
                   </p>
                 )}
+                <p>{t.footIndigenous}</p>
               </details>
               <p>{t.footHotspot}</p>
             </footer>

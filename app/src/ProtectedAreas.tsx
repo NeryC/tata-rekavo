@@ -11,9 +11,11 @@ interface Props {
   /** null when there are no figures: see `note` */
   summary: ProtectedSummary | null;
   /** why there are no figures: a custom area, or a month later than the data */
-  note: "custom" | "late" | null;
+  note: "custom" | "late" | "stale" | null;
   /** last month with protected-area data, e.g. "Oct 2026" */
   throughLabel: string;
+  /** last day the figures cover, "YYYY-MM-DD" */
+  asOf: string;
   zoneLabel: string;
   /** context.json meta.source */
   source: string;
@@ -21,7 +23,7 @@ interface Props {
 }
 
 /** "Protected areas": the areas that overlap the selected zone, with the fire inside each for the selected month. Folded by default. */
-export default function ProtectedAreas({ summary, note, throughLabel, zoneLabel, source, coverage }: Props) {
+export default function ProtectedAreas({ summary, note, throughLabel, zoneLabel, source, coverage, asOf }: Props) {
   const { t, num, ratio } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const listed = summary ? summary.areas.filter((a) => a.value >= LISTED_MIN) : [];
@@ -35,6 +37,7 @@ export default function ProtectedAreas({ summary, note, throughLabel, zoneLabel,
         <summary><h2 id="protected-title">{t.protTitle}</h2></summary>
         {note === "custom" && <p className="note">{t.protCustom}</p>}
         {note === "late" && <p className="note">{t.protLate(throughLabel)}</p>}
+        {note === "stale" && <p className="note">{t.protStale(asOf)}</p>}
         {summary && (<>
           <p className="note">{t.protIntro(zoneLabel)}</p>
           {coverage < 1 && <p className="rk-partial">{t.partialTag(Math.round(coverage * 100))}</p>}
