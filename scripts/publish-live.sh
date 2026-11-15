@@ -14,6 +14,8 @@ set -euo pipefail
 export AWS_DEFAULT_REGION=auto
 endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 data_dir="${1:-data/app}"
+# countries whose update failed today (scripts/update-countries.sh): their previous run is copied forward instead
+failed_file="${2:-}"
 stamp="$(date -u +%Y-%m-%dT%H-%MZ)"
 prefix="daily/${stamp}/"
 tmp="$(mktemp -d)"
@@ -28,9 +30,15 @@ put() { # put <local file> <key> <content-type> <cache-control> [gzip]
 
 immutable="public, max-age=31536000, immutable"
 countries=()
+# the run latest.json points at now, to carry failed countries forward
+prev_prefix="$(aws s3 cp "s3://${R2_BUCKET}/latest.json" - --endpoint-url "$endpoint" 2>/dev/null   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).prefix||"")}catch{}})' || true)"
+failed() { [ -n "$failed_file" ] && [ -f "$failed_file" ] && grep -q "^$1 " "$failed_file"; }
 # iso3 and folder of every country in the site's index ("" = site root, for Paraguay)
 while IFS=$'\t' read -r iso3 path; do
   dir="${data_dir}/${path}"
+  if failed "$iso3" && [ -n "$prev_prefix" ] && aws s3 cp "s3://${R2_BUCKET}/${prev_prefix}${iso3}/" "s3://${R2_BUCKET}/${prefix}${iso3}/"        --recursive --endpoint-url "$endpoint" --only-show-errors; then
+    countries+=("$iso3"); echo "carried ${iso3} forward from ${prev_prefix}"; continue
+  fi
   if [ ! -f "${dir}current.json" ] || [ ! -f "${dir}current_hotspots.csv" ]; then
     echo "skip ${iso3}: no current files"; continue
   fi

@@ -34,7 +34,7 @@ git push                    # en tu rama; si rebaseaste una rama ya publicada: g
 | `data/app/countries.json` | Cada país nuevo | No editarlo a mano: se regenera con `node countries_index.mjs data/app`. Si choca, regenerálo después del rebase. |
 | `countries_index.mjs` (`EXTRA`) | Cada país nuevo | Una línea por país: nombre en español, zona horaria y punto de ejemplo. |
 | `app/src/i18n.ts` | Cualquier texto visible | Agregá claves sin mover las demás. Siempre en `en` **y** `es`. |
-| `.github/workflows/update-data.yml` | Cada país nuevo (un paso de fetch y uno de contrato) | Copiá el bloque de otro país al final de su grupo. El issue #9 busca que el workflow lea la lista de países sola, y mientras no se resuelva, mergeen los países de a uno. |
+| `.github/workflows/update-data.yml` | Casi nadie | No hace falta tocarlo para agregar un país: `scripts/update-countries.sh` recorre solo los países de `data/app/countries.json` (dos veces por día). Un país que falla conserva sus datos anteriores, los demás se publican igual y la corrida termina en rojo para avisar. |
 | `README.md` | Cada país o método | Escribí en tu propia sección (`### <País>`) y no reescribas las ajenas. |
 | `tests/test_pipeline.py` | Cada país nuevo | Sumá tu país a las listas de `parametrize`. |
 
@@ -66,7 +66,7 @@ Usá los mismos comandos que para Bolivia, Uruguay y Perú (README, sección "Mo
 3. **Límites (gates):**
    - `grid.json` por debajo de 15 MB, y ningún archivo por encima de 50 MB (GitHub rechaza más de 100 MB);
    - el error mediano del país (`mdape`) va en el README; si pasa de 15 %, se documenta como limitación sin ocultarlo.
-4. Sumá en `app/src/i18n.ts` las etiquetas de los biomas nuevos, en `countries_index.mjs` la línea de `EXTRA`, los pasos en el workflow, tu sección en el README y la fuente de los límites en "Space Agency Partner & Other Data".
+4. Sumá en `app/src/i18n.ts` las etiquetas de los biomas nuevos, en `countries_index.mjs` la línea de `EXTRA`, tu sección en el README y la fuente de los límites en "Space Agency Partner & Other Data".
 5. Un commit por paso (`data: <País>`, `test: ...`, `ci: ...`). Probalo en la app antes de abrir el PR.
 
 Alcance: **solo Sudamérica.**
