@@ -367,6 +367,69 @@ def cmd_build(args):
     log("wrote grid.json, gaps.json, series_regions.csv, grid_monthly.csv, burn_history.json, mask.json")
 
 
+# ----------------------------------------------------------------------------- season climatology
+SEASON_YEARS = (2003, 2025)
+SEASON_UNIT = "VIIRS S-NPP-equivalent hotspots, cumulative"
+
+
+def daily_cumulative(df, years):
+    """df[date, area, w] -> {area: array (n_years, 365)} of cumulative daily weights.
+
+    DOY 1..365; Feb 29 is added to Feb 28 (DOY 59), so Mar 1 is DOY 60 in every year."""
+    years = list(years)
+    yidx = {y: i for i, y in enumerate(years)}
+    out = {}
+    for area, g in df.groupby("area", sort=False):
+        d = pd.DatetimeIndex(g["date"])
+        doy = d.day_of_year.values - (d.is_leap_year & (d.day_of_year.values >= 60))
+        row = pd.Series(d.year).map(yidx).values
+        ok = ~np.isnan(row)
+        flat = row[ok].astype(int) * 365 + (doy[ok] - 1)
+        daily = np.bincount(flat, weights=g["w"].values[ok], minlength=len(years) * 365)
+        out[area] = np.cumsum(daily.reshape(len(years), 365), axis=1)
+    return out
+
+
+def season_percentiles(cum):
+    """Per-DOY p10/p50/p90 across years of the cumulative curves (monotone by construction)."""
+    q = np.percentile(cum, [10, 50, 90], axis=0)
+    return {k: np.round(row, 1).tolist() for k, row in zip(("p10", "p50", "p90"), q)}
+
+
+def cmd_build_season(args):
+    a = load_archives(args.data)
+    v = vegetation(a).copy()
+    v["region"] = region_of(v.latitude.values, v.longitude.values)
+    flags = daily_flags(v)
+    f, _ = compute_factors(v, flags)
+    v["w"], _ = harmonized_weights(v, flags, f)
+    r, c, ok = cell_of(v.latitude.values, v.longitude.values, GRID_DEG, GRID_N)
+    v["cell"] = np.where(ok, r * GRID_N + c, -1)
+    v = v[(v.cell >= 0) & v.year.between(*SEASON_YEARS)][["date", "region", "cell", "w"]]
+    parts = [v.assign(area="paraguay"), v.assign(area=v.region)]
+    dp = os.path.join(args.out, "departments.json")
+    if os.path.exists(dp):
+        with open(dp, encoding="utf-8") as fh:
+            deps = json.load(fh)["departments"]
+        cell_dept = pd.Series({cl: d["id"] for d in deps for cl in d["cells"]})
+        area = v.cell.map(cell_dept)
+        parts.append(v.assign(area=area)[area.notna().values])
+    else:
+        log("departments.json missing: emitting only the 3 regions")
+    years = list(range(SEASON_YEARS[0], SEASON_YEARS[1] + 1))
+    cum = daily_cumulative(pd.concat(parts, ignore_index=True)[["date", "area", "w"]], years)
+    order = ["paraguay", "chaco", "oriental"] + sorted(k for k in cum if k not in ("paraguay", "chaco", "oriental"))
+    doc = {"meta": {"years": list(SEASON_YEARS), "doy": 365, "unit": SEASON_UNIT,
+                    "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")},
+           "areas": {k: season_percentiles(cum[k]) for k in order if k in cum}}
+    os.makedirs(args.out, exist_ok=True)
+    out = os.path.join(args.out, "season.json")
+    with open(out + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(doc, fh, separators=(",", ":"))
+    atomic_replace([out + ".tmp"])
+    log(f"season.json: {len(doc['areas'])} areas, {os.path.getsize(out):,} bytes")
+
+
 # ----------------------------------------------------------------------------- validate
 def cmd_validate(args):
     import matplotlib
@@ -900,11 +963,12 @@ def main():
     f = sp.add_parser("fetch-current"); f.add_argument("--out", default="data/app"); f.add_argument("--map-key")
     f.add_argument("--start", default="2026-01-01"); f.add_argument("--end"); f.add_argument("--cache", default="data/api_cache")
     f.add_argument("--offline", action="store_true", help="build current.json from cached windows only, no API calls")
+    sn = sp.add_parser("build-season"); sn.add_argument("--data", default="data/raw"); sn.add_argument("--out", default="data/app")
     r = sp.add_parser("build-regions"); r.add_argument("--out", default="data/app"); r.add_argument("--ext", default="data/ext")
     r.add_argument("--refresh", action="store_true", help="re-download the boundaries even if data/ext/pry_adm1.geojson exists")
     a = p.parse_args()
     {"download": cmd_download, "build": cmd_build, "export-hotspots": cmd_export_hotspots, "validate": cmd_validate, "fetch-current": cmd_fetch_current,
-     "build-regions": cmd_build_regions}[a.cmd](a)
+     "build-regions": cmd_build_regions, "build-season": cmd_build_season}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -255,3 +255,57 @@ def test_departments_real_data():
     grid_ids = {c[0] for c in grid["cells"]}
     assert seen <= grid_ids
     assert len(seen) / len(grid_ids) >= 0.99
+
+
+# ----------------------------------------------------------------------------- season climatology
+def _synthetic_weights():
+    import pandas as pd
+    rows = []
+    for k, year in enumerate([2021, 2022, 2023], start=1):   # 1, 2, 3 hotspots per day
+        for d in pd.date_range(f"{year}-01-01", f"{year}-12-31"):
+            rows.append((d, "paraguay", float(k)))
+    return pd.DataFrame(rows, columns=["date", "area", "w"])
+
+
+def test_daily_cumulative_median_and_shape():
+    cum = firms_pipeline.daily_cumulative(_synthetic_weights(), [2021, 2022, 2023])["paraguay"]
+    assert cum.shape == (3, 365)
+    p = firms_pipeline.season_percentiles(cum)
+    assert p["p50"][364] == 730          # median of 365, 730, 1095
+    assert p["p50"][0] == 2
+
+
+def test_daily_cumulative_leap_day_added_to_doy_59():
+    import pandas as pd
+    df = pd.DataFrame({"date": pd.to_datetime(["2024-02-28", "2024-02-29", "2024-03-01"]),
+                       "area": "paraguay", "w": [1.0, 2.0, 4.0]})
+    cum = firms_pipeline.daily_cumulative(df, [2024])["paraguay"][0]
+    assert cum[57] == 0 and cum[58] == 3      # DOY 59 = Feb 28 + Feb 29
+    assert cum[59] == 7 and cum[364] == 7     # Mar 1 is DOY 60, as in a common year
+
+
+def test_season_percentiles_monotone_and_rounded():
+    rng = np.random.default_rng(0)
+    cum = np.cumsum(rng.random((23, 365)) * 10, axis=1)
+    p = firms_pipeline.season_percentiles(cum)
+    for k in ("p10", "p50", "p90"):
+        assert len(p[k]) == 365
+        assert np.all(np.diff(p[k]) >= 0)
+        assert all(round(x, 1) == x for x in p[k])
+    assert all(a <= b <= c for a, b, c in zip(p["p10"], p["p50"], p["p90"]))
+
+
+def test_season_real_data_matches_annual_median():
+    import pandas as pd
+    sj, sr = ROOT / "data" / "app" / "season.json", ROOT / "data" / "app" / "series_regions.csv"
+    if not sj.exists():
+        pytest.skip("data/app/season.json not present")
+    season = json.loads(sj.read_text(encoding="utf-8"))
+    assert season["meta"]["years"] == [2003, 2025] and season["meta"]["doy"] == 365
+    assert {"paraguay", "chaco", "oriental"} <= set(season["areas"])
+    s = pd.read_csv(sr)
+    s = s[(s.area == "paraguay") & s.year.between(2003, 2025)]
+    med = s.groupby("year").harmonized.sum().median()
+    p50 = season["areas"]["paraguay"]["p50"][364]
+    assert abs(p50 - med) / med < 0.02
+    assert sj.stat().st_size < 400_000
