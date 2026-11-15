@@ -10,7 +10,8 @@ Subcommands
   validate       Hold-out validation of the harmonization + error model + figure
   build-frp      Harmonized Fire Radiative Power (MW per cell-month, VIIRS S-NPP-equivalent) + its own validation (experimental)
   fetch-current  Pull recent months from the FIRMS Area API (needs a free MAP_KEY); best VIIRS product per day
-  build-regions  Department boundaries (geoBoundaries ADM1) and which 0.1-degree grid cells belong to each department
+  build-regions  Department boundaries (geoBoundaries ADM1) and which grid cells belong to each department; biome countries
+                 also get regions.json (grid cells of each factor region)
   build-context  Fire statistics per protected area (WDPA): monthly harmonized hotspots and FRP inside each area; statistics only,
                  never geometry (WDPA terms forbid publishing downloadable WDPA data or spatial derivatives)
 
@@ -1641,6 +1642,48 @@ def departments_note(cfg: CountryConfig):
         "containing its centre; grid cells whose centre falls just outside the simplified outline go to the nearest unit.")
 
 
+REGION_CELLS_NOTE = ("A grid cell belongs to the factor region (biome) of most of its 0.05-degree raster cells, sampled at their "
+                     "centres (sea / lake cells: nearest biome); a cell whose sub-cells all fall in other biomes belongs to none. "
+                     "The app uses these cells to draw and sum the region presets; the factors themselves use each hotspot's own cell.")
+
+
+def build_region_cells(grid_meta_grid, cfg: CountryConfig):
+    """Biome countries: {region id: sorted cell indices} over every cell of the app grid (rows x cols).
+    Each cell is sampled at the centres of its 0.05-degree sub-cells; the most frequent factor region wins
+    (ties: the first in cfg.region_names). Regions without any cell are left out."""
+    g = grid_meta_grid
+    deg, rows, cols = float(g["deg"]), int(g["rows"]), int(g["cols"])
+    k = max(1, int(round(deg / 0.05)))
+    off = (np.arange(k) + 0.5) * (deg / k)
+    rr, cc = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
+    lat = (g["lat0"] + rr * deg)[..., None, None] + off[None, None, :, None]
+    lon = (g["lon0"] + cc * deg)[..., None, None] + off[None, None, None, :]
+    lat, lon = np.broadcast_arrays(lat, lon)
+    ids = np.asarray(region_of(lat.ravel(), lon.ravel(), cfg)).reshape(rows * cols, k * k)
+    names = cfg.region_names
+    counts = np.stack([(ids == n).sum(1) for n in names], axis=1)   # (cells, regions)
+    best = counts.argmax(1)
+    has = counts.max(1) > 0
+    out = {}
+    for j, n in enumerate(names):
+        cells = np.flatnonzero(has & (best == j)).tolist()
+        if cells:
+            out[n] = cells
+    return out
+
+
+def write_region_cells(cfg: CountryConfig, grid, out_dir):
+    """regions.json for a biome country (the river split of Paraguay is computed in the app from grid.json meta)."""
+    cells = build_region_cells(grid["meta"]["grid"], cfg)
+    doc = {"meta": {"kind": "biome", "source": BIOMES_SOURCE, "note": REGION_CELLS_NOTE},
+           "regions": [{"id": k, "label": cfg.region_label(k), "cells": v} for k, v in cells.items()]}
+    path = os.path.join(out_dir, "regions.json")
+    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(doc, fh, ensure_ascii=False, separators=(",", ":"))
+    atomic_replace([path + ".tmp"])
+    log(f"regions.json: {', '.join(f'{k} {len(v)}' for k, v in cells.items())} cells, {os.path.getsize(path)/1e3:.0f} KB")
+
+
 def cmd_build_regions(args):
     from pathlib import Path
     cfg = load_country(args.country)
@@ -1662,6 +1705,8 @@ def cmd_build_regions(args):
     atomic_replace([path + ".tmp"])
     log(f"departments.json: {len(deps)} departments, {os.path.getsize(path)/1e3:.0f} KB, "
         f"coverage {rep['before']:.2%} -> {rep['after']:.2%}, unassigned {len(rep['unassigned'])}")
+    if cfg.regions.get("kind") == "biome":
+        write_region_cells(cfg, grid, args.out)
 
 
 # ----------------------------------------------------------------------------- main
