@@ -34,3 +34,9 @@ test("topRows: skips rows under the minimum, keeps the order and the limit", () 
   assert.deepEqual(topRows(rows, 10).map((r) => r.id), ["a", "b", "d", "e"]);
   assert.deepEqual(topRows(undefined), []);
 });
+
+test("topRows: the verdict names a territory only once when distinct records share its name", () => {
+  const rows = [{ id: "1", name: "Chaidi", value: 10 }, { id: "2", name: "Chaidi", value: 8 }, { id: "3", name: "Otro", value: 5 }, { id: "4", name: "Tercero", value: 2 }];
+  assert.deepEqual(topRows(rows).map(r => r.id), ["1", "3", "4"]);
+});
+

@@ -21,7 +21,16 @@ export function shareLabel(share: number | null | undefined, locale: string): st
   return pct > 0 && pct < 1 ? "<1" : Math.round(pct).toLocaleString(locale);
 }
 
-/** The rows that carry visible fire (value >= min), at most `n`, in the order given. */
-export function topRows<T extends { value: number }>(rows: readonly T[] | undefined, n = 3, min = 0.5): T[] {
-  return rows ? rows.filter((r) => r.value >= min).slice(0, n) : [];
+/** Visible rows in order, naming each territory only once in the verdict. */
+export function topRows<T extends { value: number; name?: string }>(rows: readonly T[] | undefined, n = 3, min = 0.5): T[] {
+  const seen = new Set<string>();
+  return (rows ?? []).filter((row) => {
+    if (row.value < min) return false;
+    if (!row.name) return true;
+    const name = row.name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  }).slice(0, n);
 }
+
