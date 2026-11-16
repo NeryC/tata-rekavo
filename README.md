@@ -112,6 +112,9 @@ The approach follows the same principle used in the literature to bridge the MOD
   Months reconstructed from MODIS are hatched. The tooltip includes a field-validation hint ("Modo Catador") that turns the model uncertainty into guidance for checking imagery.
 - **Hotspots per year:** a toggle between the harmonized record and the raw sensors stitched together, which shows the false 2012 jump.
 - **Map:** hotspots per ~11 km cell for the month, plus the individual VIIRS hotspots for 2026.
+- **Recent hotspots and their provenance:** the map points can show the selected month, the last 24 hours or the last 7 days. The recent windows are counted back from now and only move the points: the monthly verdict and the cells keep the selected month. A status line gives how many hotspots, their time span in the country's local time with its UTC offset (FIRMS times are UTC), whether the data are too old to cover the window, and that this is not real-time monitoring. Clicking or tapping a hotspot shows its date, local time, satellite, instrument, confidence and FIRMS product; a list of the 50 most recent in the area is the keyboard and screen-reader alternative. Links keep the window as `w=24h` or `w=7d`.
+- **Share a hotspot for verification on the ground:** from its popup or the list, a hotspot can be shared as a link plus a plain-text description (phones use the system share sheet). The link adds `f=lat,lon,time` with the location rounded to 0.01° (~1 km, about the VIIRS pixel) and the UTC acquisition time; whoever opens it sees date, local time, sensor, confidence, product, last update and "satellite detection, not verified on the ground", and the map centres on it. There are no accounts, photos or "verified" labels.
+- **Estimated burned area (MapBiomas Fuego), optional:** for countries that ship `burned_area.json`, a collapsed block gives the hectares burned in the country or a department in the selected year and month, from Landsat 30 m burn scars (1999–2024). It is a separate historical product: never a number of fires, and "no data" after the collection. See `scripts/burned_area.py`.
 - **Weather context:** an optional panel requests current modelled temperature, humidity and wind, yesterday's estimated precipitation and today's forecast precipitation from [Open-Meteo](https://open-meteo.com/). For a coordinate search it uses that point; otherwise it selects a grid cell near the centre of the selected area's bounding box. The API's model grid coordinates and local time are shown: this is one point, not an average for the whole area, and is current even when the selected fire month is historical. It is not a fire-spread forecast. The request is made only when the panel is opened and sends the selected reference coordinates to Open-Meteo. Responses are cached in the browser for 15 minutes. Weather data: Open-Meteo, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The provider's free API is limited to non-commercial use and subject to [rate limits and terms](https://open-meteo.com/en/terms).
 - **Hotspots without nearby historical detections:** recent hotspots with no detection in the same or neighbouring ~1 km cells during the period stated in `burn_history.json`. They are highlighted on the map and retain the CSV flag `new_place` for compatibility. Absence of a detection does not prove absence of fire: clouds, satellite overpass times and spatial resolution can hide it. Hotspots near a border may be over-flagged because the historical record is country-specific.
 - **Downloads for the area and date range:**
@@ -300,11 +303,11 @@ The verdict class matches the one VIIRS would give in 71.3 % of months (country)
 
 The data pipeline, the validation analysis, the reference client module, the figures and parts of this README were produced with the assistance of an AI tool (a large language model) and reviewed by the team. AI-assisted figures carry a note in their caption. No NASA logos or branding are used.
 
-   ## Team
-   
-   **Tata Rekavo** is a multidisciplinary team from Paraguay, combining data engineering, artificial intelligence, and on-the-ground physical validation:
-   
-   - **Nery Alberto Cano Ortigoza** | *Lead Data Engineer & Architect*. Designed and implemented the core harmonization pipeline, sensor outage handling, and the multi-country calibration framework.
-   - **Jesús Emanuel Fernández Sosa** | *AI & UX Strategy*. Led the integration of the "Modo Catador" (Physical Validation) layer, translating statistical uncertainty into actionable insights for field decision-makers. Authored project documentation and submission strategy.
-   - **Mario Salvador Maldonado Cañete** | *Physical Validation & Domain Expert*. Provides critical on-the-ground validation of fire patterns in the Chaco and Oriental regions, ensuring that algorithmic outputs align with real-world fire behavior.
+## Team
+
+**Tata Rekavo** is a multidisciplinary team from Paraguay, combining data engineering, artificial intelligence, and on-the-ground physical validation:
+
+- **Nery Alberto Cano Ortigoza** | *Lead Data Engineer & Architect*. Designed and implemented the core harmonization pipeline, sensor outage handling, and the multi-country calibration framework.
+- **Jesús Emanuel Fernández Sosa** | *AI & UX Strategy*. Led the integration of the "Modo Catador" (Physical Validation) layer, translating statistical uncertainty into actionable insights for field decision-makers. Authored project documentation and submission strategy.
+- **Mario Salvador Maldonado Cañete** | *Physical Validation & Domain Expert*. Provides critical on-the-ground validation of fire patterns in the Chaco and Oriental regions, ensuring that algorithmic outputs align with real-world fire behavior.
 
