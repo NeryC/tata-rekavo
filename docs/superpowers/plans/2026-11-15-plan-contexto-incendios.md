@@ -8,7 +8,7 @@
 |---|---|---|
 | 1. Claridad de datos | Terminada (PR #31) | Textos y período real revisados; 93 pruebas, compilación y navegador en español/inglés a 375 y 1440 px correctos. |
 | 2. Fecha y procedencia | Terminada (PR #33) | 103 pruebas y compilación correctas; navegador en español/inglés a 320, 375 y 1440 px con Paraguay (GMT-3) y Bolivia (GMT-4). Ventana emergente del foco comprobada: abre con clic o toque y cierra al tocar fuera. |
-| 3. Área quemada | Código listo; datos en cálculo | Generador `scripts/burned_area.py` (Earth Engine, proyecto `tata-rekavo-ee`), panel opcional y contrato listos. El panel solo aparece cuando existe `data/app/burned_area.json`; la exportación a 30 m está en curso. Las versiones muestreadas (90–300 m) se descartaron: usan pirámides de la imagen y difieren hasta 40 %. |
+| 3. Área quemada | Terminada (piloto Paraguay) | `data/app/burned_area.json`: hectáreas por año y mes, país y 17 departamentos, 1999–2024, a 30 m. Validación con MODIS MCD64A1 (2001–2024): correlación interanual r = 0,81; MapBiomas da una mediana de 0,74 veces el área de MODIS. Las versiones muestreadas (90–300 m) se descartaron: usan pirámides de la imagen y difieren hasta 40 %. |
 | 4. Caso Cerro Corá | Bloqueada | Requiere permiso de los autores del póster para reutilizar imágenes, fotos y límites; sin permiso, solo un resumen propio con referencia. |
 | 5. Compartir para verificación | Terminada (PR #35) | Enlace `f=lat,lon,hora UTC` con ubicación redondeada a ~1 km; tarjeta para quien lo recibe; 108 pruebas, compilación y navegador a 320 y 1440 px en español e inglés. |
 

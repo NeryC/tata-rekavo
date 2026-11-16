@@ -149,7 +149,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     void loadSeason(path).then(setSeason);
     if (country.files?.context !== false) void loadContext(path).then(setContext); // protected areas: Paraguay only
     setBurned(null);
-    if (country.files?.burnedArea) void loadBurnedArea(path).then(setBurned); // never requested by a country without it
+    if (country.files?.burnedArea !== false) void loadBurnedArea(path).then(setBurned); // like the other optional files: skipped when the index says the country has none
     if (country.files?.indigenous !== false) void loadIndigenous(path).then(setIndigenous); // indigenous territories: not Uruguay
     let alive = true;
     loadData(path, country.iso3, country.files).then(async ({ data: d, extras }) => {

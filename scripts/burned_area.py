@@ -43,8 +43,9 @@ SOURCE = {
 }
 
 
-def export_asset(project: str, scale: int = 30) -> str:
-    return f"projects/{project}/assets/burned_area_pry_c1" + ("" if scale == 30 else f"_{scale}m")
+def export_asset(project: str, scale: int = 30, year: int | None = None) -> str:
+    return (f"projects/{project}/assets/burned_area_pry_c1" + ("" if scale == 30 else f"_{scale}m")
+            + ("" if year is None else f"_{year}"))
 
 
 def years() -> list[int]:
@@ -90,7 +91,7 @@ def to_json(features: list[dict], department_ids: list[str], retrieved: str) -> 
 
 
 def rows_to_features(rows: list[dict]) -> list[dict]:
-    """Exported rows (department id, year, groups of {month, sum}) -> one feature per department with a property per
+    """Exported rows (department id, year, and m01..m12 for the months with burned pixels) -> one feature per department with a property per
     year and month. A year in the export is covered: its months without burned pixels are 0 and the year is the sum of
     its months. A year missing from the export stays missing (null in the file)."""
     by_id: dict[str, dict] = {}
@@ -98,7 +99,8 @@ def rows_to_features(rows: list[dict]) -> list[dict]:
         p = r["properties"]
         out = by_id.setdefault(p["id"], {"id": p["id"]})
         y = int(p["year"])
-        months = {int(g["month"]): float(g["sum"]) for g in (p.get("groups") or [])}
+        # a month column is null in rows that had no burned pixel that month: the year is covered, so it is 0
+        months = {int(k[1:]): float(v or 0) for k, v in p.items() if len(k) == 3 and k[0] == "m" and k[1:].isdigit()}
         for m in range(1, 13):
             out[prop(y, m)] = months.get(m, 0.0)
         out[prop(y)] = sum(months.values())
@@ -139,25 +141,31 @@ def cmd_export(a) -> None:
     monthly = ee.Image(ASSET_BASE + "monthly_burned_v1")
     reducer = ee.Reducer.sum().group(groupField=1, groupName="month")
     # one pass per year with the months as groups: a band per month would read every pixel twelve times more
-    tables = []
-    for y in years():
-        mb = monthly.select(f"burned_monthly_{y}")
-        img = px.addBands(mb.rename("month")).updateMask(mb.gt(0))
-        tables.append(img.reduceRegions(fc, reducer, scale=a.scale, tileScale=16)
-                      .map(lambda f, y=y: ee.Feature(None, {"id": f.get("id"), "year": y, "groups": f.get("groups")})))
-    table = ee.FeatureCollection(tables).flatten()
-    asset = export_asset(a.project, a.scale)
     try:
         ee.data.createAssetHome(f"projects/{a.project}/assets/")  # a new Cloud project has no asset folder until this runs
     except ee.EEException:
         pass  # already there
-    try:
-        ee.data.deleteAsset(asset)
-    except ee.EEException:
-        pass
-    task = ee.batch.Export.table.toAsset(collection=table, description=asset.rsplit("/", 1)[1], assetId=asset)
-    task.start()
-    print(f"started {task.id} -> {asset}")
+    # one task per year: Earth Engine runs them side by side, and a failed year can be rerun alone
+    for y in a.years or years():
+        mb = monthly.select(f"burned_monthly_{y}")
+        img = px.addBands(mb.rename("month")).updateMask(mb.gt(0))
+        # an asset table needs a geometry on every row: a fixed point, the department is in "id"
+        # and only plain values: the month groups become columns m01..m12 (months with no burned pixel are absent)
+        def row(f, y=y):
+            groups = ee.List(f.get("groups"))
+            keys = groups.map(lambda g: ee.String("m").cat(ee.Number(ee.Dictionary(g).get("month")).format("%02d")))
+            sums = groups.map(lambda g: ee.Dictionary(g).get("sum"))
+            props = ee.Dictionary.fromLists(keys, sums).combine({"id": f.get("id"), "year": y})
+            return ee.Feature(ee.Geometry.Point([-58.0, -23.0]), props)
+        table = img.reduceRegions(fc, reducer, scale=a.scale, tileScale=4).map(row)
+        asset = export_asset(a.project, a.scale, y)
+        try:
+            ee.data.deleteAsset(asset)
+        except ee.EEException:
+            pass
+        task = ee.batch.Export.table.toAsset(collection=table, description=asset.rsplit("/", 1)[1], assetId=asset)
+        task.start()
+        print(f"started {task.id} -> {asset}")
 
 
 def cmd_status(a) -> None:
@@ -170,7 +178,7 @@ def cmd_status(a) -> None:
 def cmd_fetch(a) -> None:
     ee = _ee(a.project)
     _, ids = _departments(ee)
-    rows = ee.FeatureCollection(export_asset(a.project, a.scale)).getInfo()["features"]
+    rows = [r for y in years() for r in ee.FeatureCollection(export_asset(a.project, a.scale, y)).getInfo()["features"]]
     doc = to_json(rows_to_features(rows), ids, dt.date.today().isoformat())
     check(doc)
     out = ROOT / "data/app/burned_area.json"
@@ -188,28 +196,24 @@ def pearson(xs: list[float], ys: list[float]) -> float:
 
 
 def cmd_validate(a) -> None:
-    """Two checks of data/app/burned_area.json that do not reuse its own numbers:
-    1) boundary loss: the whole MapBiomas extent (sampled every 300 m) against the sum of departments;
-    2) an independent product, MODIS MCD64A1 (500 m), year by year: same ups and downs expected, with MapBiomas
-       higher because 30 m Landsat sees small scars that 500 m MODIS misses."""
+    """A check of data/app/burned_area.json that does not reuse its own numbers: an independent product,
+    MODIS MCD64A1 (500 m), year by year. Result on 2026-11-15 (2001-2024): year-to-year correlation r = 0.81,
+    MapBiomas at a median 0.74 of MODIS; the two products map burn scars with different sensors and methods."""
     ee = _ee(a.project)
     doc = json.loads((ROOT / "data/app/burned_area.json").read_text(encoding="utf-8"))
     ours = doc["zones"]["paraguay"]["annual"]
     pry = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017").filter(ee.Filter.eq("country_na", "Paraguay")).geometry()
-    annual = ee.Image(ASSET_BASE + "annual_burned_v1")
     px = ee.Image.pixelArea().divide(1e4)
     mcd = ee.ImageCollection("MODIS/061/MCD64A1").select("BurnDate")
+    # (a sampled comparison with the whole MapBiomas extent is not done: at a coarser scale Earth Engine reads
+    # image pyramids that mix burned and unburned pixels, which moved 2024 by 40 % between 150 and 300 m)
     rows = []
     for y in range(2001, LAST_YEAR + 1):
-        full = px.updateMask(annual.select(f"burned_area_{y}").eq(1)).reduceRegion(
-            ee.Reducer.sum(), pry, scale=300, maxPixels=1e10).get("area")
         modis_img = mcd.filterDate(f"{y}-01-01", f"{y + 1}-01-01").max().gt(0)
         modis = px.updateMask(modis_img).reduceRegion(ee.Reducer.sum(), pry, scale=500, maxPixels=1e10).get("area")
-        f, m = ee.List([full, modis]).getInfo()
-        rows.append((y, ours[str(y)], f, m))
-        print(f"{y}  departments {ours[str(y)]:>12,} ha  full extent ~{f:>12,.0f} ha  MODIS MCD64A1 {m:>12,.0f} ha")
-    loss = [abs(f - o) / f for _, o, f, _ in rows if f]
-    print(f"boundary difference: median {sorted(loss)[len(loss) // 2]:.1%}, max {max(loss):.1%}")
+        m = modis.getInfo()
+        rows.append((y, ours[str(y)], None, m))
+        print(f"{y}  MapBiomas {ours[str(y)]:>12,} ha  MODIS MCD64A1 {m:>12,.0f} ha  ratio {ours[str(y)] / m:.2f}")
     print(f"year-to-year correlation with MODIS: r = {pearson([o for _, o, _, _ in rows], [m for *_, m in rows]):.2f}")
     print(f"MapBiomas / MODIS, median ratio: {sorted(o / m for _, o, _, m in rows if m)[len(rows) // 2]:.2f}")
 
@@ -220,6 +224,7 @@ def main(argv=None) -> int:
     for name, fn in (("export", cmd_export), ("status", cmd_status), ("fetch", cmd_fetch), ("validate", cmd_validate)):
         s = sub.add_parser(name)
         s.add_argument("--project", required=True)
+        s.add_argument("--years", type=int, nargs="*", help="export only these years (default: all)")
         s.add_argument("--scale", type=int, default=30,
                        help="sampling distance in m: 30 reads every Landsat pixel; a larger one samples them (faster, approximate)")
         s.set_defaults(fn=fn)
