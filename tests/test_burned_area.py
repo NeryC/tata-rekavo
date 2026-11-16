@@ -62,9 +62,9 @@ def test_pearson():
 
 def test_grouped_rows_become_one_feature_per_department_with_years_as_the_sum_of_months():
     rows = [
-        {"properties": {"id": "a", "year": 2024, "groups": [{"month": 9, "sum": 200.0}, {"month": 8, "sum": 100.0}]}},
-        {"properties": {"id": "a", "year": 2023, "groups": []}},
-        {"properties": {"id": "b", "year": 2024, "groups": [{"month": 1, "sum": 5.0}]}},
+        {"properties": {"id": "a", "year": 2024, "m09": 200.0, "m08": 100.0}},
+        {"properties": {"id": "a", "year": 2023}},
+        {"properties": {"id": "b", "year": 2024, "m01": 5.0}},
     ]
     feats = {f["properties"]["id"]: f["properties"] for f in ba.rows_to_features(rows)}
     assert feats["a"][ba.prop(2024)] == 300.0
