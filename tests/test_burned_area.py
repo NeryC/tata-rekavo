@@ -64,7 +64,7 @@ def test_grouped_rows_become_one_feature_per_department_with_years_as_the_sum_of
     rows = [
         {"properties": {"id": "a", "year": 2024, "m09": 200.0, "m08": 100.0}},
         {"properties": {"id": "a", "year": 2023}},
-        {"properties": {"id": "b", "year": 2024, "m01": 5.0}},
+        {"properties": {"id": "b", "year": 2024, "m01": 5.0, "m11": None}},
     ]
     feats = {f["properties"]["id"]: f["properties"] for f in ba.rows_to_features(rows)}
     assert feats["a"][ba.prop(2024)] == 300.0
@@ -73,3 +73,4 @@ def test_grouped_rows_become_one_feature_per_department_with_years_as_the_sum_of
     assert feats["a"][ba.prop(2023)] == 0.0
     assert ba.prop(2022) not in feats["a"]  # a year missing from the export stays missing (null later), not 0
     assert feats["b"][ba.prop(2024, 1)] == 5.0
+    assert feats["b"][ba.prop(2024, 11)] == 0.0  # the asset table fills months absent in other rows with null
