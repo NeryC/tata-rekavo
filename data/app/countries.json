@@ -25,7 +25,8 @@
     "burnHistory": true,
     "hotspotArchive": true,
     "context": true,
-    "indigenous": true
+    "indigenous": true,
+    "burnedArea": false
    }
   },
   {
@@ -52,7 +53,8 @@
     "burnHistory": false,
     "hotspotArchive": false,
     "context": false,
-    "indigenous": true
+    "indigenous": true,
+    "burnedArea": false
    }
   },
   {
@@ -80,7 +82,8 @@
     "burnHistory": true,
     "hotspotArchive": true,
     "context": false,
-    "indigenous": true
+    "indigenous": true,
+    "burnedArea": false
    }
   },
   {
@@ -107,7 +110,8 @@
     "burnHistory": true,
     "hotspotArchive": true,
     "context": false,
-    "indigenous": true
+    "indigenous": true,
+    "burnedArea": false
    }
   },
   {
@@ -135,7 +139,8 @@
     "burnHistory": true,
     "hotspotArchive": true,
     "context": false,
-    "indigenous": false
+    "indigenous": false,
+    "burnedArea": false
    }
   }
  ]
