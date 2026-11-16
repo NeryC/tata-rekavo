@@ -444,3 +444,10 @@ i.hatch { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255
 .vf-facts dd { margin: 0; overflow-wrap: anywhere; }
 .hs-share { margin-top: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--ink); border-radius: 6px; background: var(--surface); font-size: 13px; cursor: pointer; }
 .hs-list button.small { min-height: 32px; padding: 0 8px; font-size: 13px; white-space: nowrap; }
+
+/* estimated burned area (MapBiomas), a historical product apart from the hotspots */
+.burned-area .ba-series .table-scroll { margin-top: 8px; max-height: 320px; overflow-y: auto; }
+.burned-area table { border-collapse: collapse; font-size: 14px; min-width: 200px; }
+.burned-area th, .burned-area td { padding: 4px 10px; border-bottom: 1px solid var(--rule); text-align: right; font-variant-numeric: tabular-nums; }
+.burned-area th:first-child { text-align: left; }
+.burned-area summary h2 { display: inline; }

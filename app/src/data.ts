@@ -7,6 +7,7 @@ import type { SeasonFile } from "./season";
 import { liveFileUrl, storeBase, validManifest, type LiveManifest } from "./liveData";
 import { newerSummary, validSummary, type SummaryFile } from "./highlights";
 import { provenance } from "./hotspotTime";
+import { validateBurnedArea, type BurnedAreaFile } from "./burnedArea";
 
 export interface Hotspot {
   lon: number; lat: number; date: string; m: number; frp: number; cell: number;
@@ -46,7 +47,7 @@ export interface CountryInfo {
   /** country median error above the 15 % gate: the selector tags it as a pilot */
   pilot?: boolean;
   /** optional files the country ships (from the index); a missing entry means "unknown: try it" */
-  files?: { burnHistory: boolean; hotspotArchive: boolean; context: boolean; indigenous: boolean };
+  files?: { burnHistory: boolean; hotspotArchive: boolean; context: boolean; indigenous: boolean; burnedArea?: boolean };
 }
 export interface CountriesIndex { default: string; countries: CountryInfo[] }
 
@@ -224,6 +225,15 @@ export function loadIndigenous(path = ""): Promise<ContextFile | null> {
   return once(indigenousCache, path, () => fetch(url("indigenous.json", path))
     .then((r) => (r.ok ? r.json() : null))
     .then(validateIndigenous)
+    .catch(() => null));
+}
+
+const burnedCache = new Map<string, Promise<BurnedAreaFile | null>>();
+/** burned_area.json (MapBiomas Fuego): estimated burned surface by year and month; null when missing or invalid. */
+export function loadBurnedArea(path = ""): Promise<BurnedAreaFile | null> {
+  return once(burnedCache, path, () => fetch(url("burned_area.json", path))
+    .then((r) => (r.ok ? r.json() : null))
+    .then(validateBurnedArea)
     .catch(() => null));
 }
 

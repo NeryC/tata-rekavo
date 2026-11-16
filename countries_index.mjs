@@ -36,6 +36,7 @@ export function buildIndex(config, dataDir) {
         hotspotArchive: existsSync(join(dataDir, path, "hotspots", "index.json")),
         context: existsSync(join(dataDir, path, "context.json")),
         indigenous: existsSync(join(dataDir, path, "indigenous.json")),
+        burnedArea: existsSync(join(dataDir, path, "burned_area.json")),
       },
     });
   }

@@ -11,6 +11,8 @@ import WeatherPanel from "./WeatherPanel";
 import HotspotWindowPanel from "./HotspotWindowPanel";
 import { describeHotspot, findShared, formatInstant, inWindow, shareRef, type HotspotRef, type HotspotWindow } from "./hotspotTime";
 import SharedHotspotCard from "./SharedHotspotCard";
+import BurnedAreaPanel from "./BurnedAreaPanel";
+import type { BurnedAreaFile } from "./burnedArea";
 import { historyPeriodLabel } from "./historyPeriod";
 import { alertRows, alertText, type SummaryFile } from "./highlights";
 import { isContextStale } from "./contextCheck";
@@ -20,7 +22,7 @@ import { downloadReport } from "./report";
 import { formatUpdated, isStale } from "./format";
 import {
   areaKm2, bboxOfCells, circleRing, download, downloadParts, estimateHistoricalRows, historicalHotspotRows, hotspotIndex,
-  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadIndigenous, loadSeason, loadSummary, PARAGUAY, regionPresets, sourceOf,
+  HOTSPOT_HEADER, loadContext, loadCountries, loadData, loadDepartments, loadFrp, loadIndigenous, loadBurnedArea, loadSeason, loadSummary, PARAGUAY, regionPresets, sourceOf,
   type AppData, type CountryInfo, type DepartmentsFile,
 } from "./data";
 import { countryOf, decodeState, encodeState, validateCoords, type ShareState } from "./urlState";
@@ -106,6 +108,7 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
   const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [season, setSeason] = useState<SeasonFile | null>(null); // null until loaded, or when it failed: the chart stays hidden
   const [context, setContext] = useState<ContextFile | null>(null); // protected-area statistics; null until loaded, or when it failed: the block stays hidden
+  const [burned, setBurned] = useState<BurnedAreaFile | null>(null); // MapBiomas burned area: only countries that ship burned_area.json
   const [indigenous, setIndigenous] = useState<ContextFile | null>(null); // indigenous-territory statistics: same, for the countries that ship indigenous.json
   const [polygon, setPolygon] = useState<number[][] | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number; r: number } | null>(null);
@@ -145,6 +148,8 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
     void depsLoad.then(setDepartments);
     void loadSeason(path).then(setSeason);
     if (country.files?.context !== false) void loadContext(path).then(setContext); // protected areas: Paraguay only
+    setBurned(null);
+    if (country.files?.burnedArea) void loadBurnedArea(path).then(setBurned); // never requested by a country without it
     if (country.files?.indigenous !== false) void loadIndigenous(path).then(setIndigenous); // indigenous territories: not Uruguay
     let alive = true;
     loadData(path, country.iso3, country.files).then(async ({ data: d, extras }) => {
@@ -782,6 +787,9 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
               </>) : <p className="note">{t.newUnavailable}</p>}
             </section>}
 
+            {burned && <BurnedAreaPanel doc={burned} zoneLabel={zoneLabel} year={selYear} month={selMonth}
+              zone={zoneKind === country.area ? country.area : zoneKind === "department" && departmentId ? departmentId : ""} />}
+
             <section className="history-section"><details>
               <summary><h2>{t.exploreHistory}</h2></summary>
             <section>
@@ -905,6 +913,11 @@ function CountryView({ country, countries, lang, setLang, onCountry }: ViewProps
                 {indigenous && (
                   <p>{t.footLandmark(indigenous.meta.citation, indigenous.meta.license ?? "", indigenous.meta.retrieved)}{" "}
                     <a href={LANDMARK_URL} target="_blank" rel="noreferrer">landmarkmap.org</a>. {t.footLandmarkTerms(indigenous.meta.contributors ?? [])}
+                  </p>
+                )}
+                {burned && (
+                  <p>{t.baFoot(burned.citation, burned.license, burned.retrieved)}{" "}
+                    <a href={burned.url} target="_blank" rel="noreferrer">paraguay.mapbiomas.org</a>.
                   </p>
                 )}
               </details>
